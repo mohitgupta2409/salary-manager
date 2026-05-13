@@ -1,5 +1,8 @@
 # Backend
 backend/salary-manager.db
+backend/salary-manager.db-shm
+backend/salary-manager.db-wal
+backend/bin/
 backend/tmp/
 
 # Frontend
