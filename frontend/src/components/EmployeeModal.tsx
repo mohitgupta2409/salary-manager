@@ -1,57 +1,72 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { X } from 'lucide-react';
-import type { Employee, EmployeeFormData } from '../types/employee';
+import type { Country, Department, Employee, EmployeeFormData, JobTitle } from '../types/employee';
 
 interface Props {
   employee?: Employee | null;
+  countries: Country[];
+  departments: Department[];
+  jobTitles: JobTitle[];
   onSave: (data: EmployeeFormData) => Promise<void>;
   onClose: () => void;
 }
 
-const COUNTRIES = [
-  'United States', 'India', 'United Kingdom', 'Germany', 'Canada',
-  'Australia', 'France', 'Japan', 'Singapore',
-];
-
-const CURRENCY_MAP: Record<string, string> = {
-  'United States': 'USD', 'India': 'INR', 'United Kingdom': 'GBP',
-  'Germany': 'EUR', 'Canada': 'CAD', 'Australia': 'AUD',
-  'France': 'EUR', 'Japan': 'JPY', 'Singapore': 'SGD',
-};
-
-const DEPARTMENTS = [
-  'Engineering', 'Product', 'Design', 'Data Science', 'Marketing',
-  'Sales', 'Human Resources', 'Finance', 'Operations',
-  'Customer Success', 'Legal', 'IT Infrastructure',
-];
-
 const initial: EmployeeFormData = {
-  full_name: '', email: '', job_title: '', department: '',
-  country: '', salary: 0, currency: 'USD', join_date: '',
+  first_name: '',
+  last_name: '',
+  email: '',
+  job_title_id: 0,
+  country_id: 0,
+  salary: 0,
+  address: '',
+  join_date: '',
 };
 
-export default function EmployeeModal({ employee, onSave, onClose }: Props) {
+export default function EmployeeModal({
+  employee, countries, departments, jobTitles, onSave, onClose,
+}: Props) {
   const [form, setForm] = useState<EmployeeFormData>(initial);
+  const [departmentID, setDepartmentID] = useState<number>(0);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Filter job titles by selected department
+  const filteredJobTitles = useMemo(() => {
+    if (!departmentID) return jobTitles;
+    return jobTitles.filter(jt => jt.department_id === departmentID);
+  }, [jobTitles, departmentID]);
+
+  // Compute currency from selected country (for display only)
+  const selectedCurrency = useMemo(() => {
+    const c = countries.find(c => c.id === form.country_id);
+    return c?.currency || '';
+  }, [countries, form.country_id]);
 
   useEffect(() => {
     if (employee) {
       setForm({
-        full_name: employee.full_name,
+        first_name: employee.first_name,
+        last_name: employee.last_name,
         email: employee.email,
-        job_title: employee.job_title,
-        department: employee.department,
-        country: employee.country,
+        job_title_id: employee.job_title_id,
+        country_id: employee.country_id,
         salary: employee.salary,
-        currency: employee.currency,
+        address: employee.address || '',
         join_date: employee.join_date.split('T')[0],
       });
+      // Set department from the employee's job title
+      const jt = jobTitles.find(j => j.id === employee.job_title_id);
+      if (jt) setDepartmentID(jt.department_id);
     }
-  }, [employee]);
+  }, [employee, jobTitles]);
 
-  const handleCountryChange = (country: string) => {
-    setForm(f => ({ ...f, country, currency: CURRENCY_MAP[country] || f.currency }));
+  const handleDepartmentChange = (deptID: number) => {
+    setDepartmentID(deptID);
+    // Clear job_title_id if it's no longer valid for the new department
+    const stillValid = jobTitles.some(jt => jt.id === form.job_title_id && jt.department_id === deptID);
+    if (!stillValid) {
+      setForm(f => ({ ...f, job_title_id: 0 }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -68,7 +83,7 @@ export default function EmployeeModal({ employee, onSave, onClose }: Props) {
     }
   };
 
-  const inputClass = 'block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none';
+  const inputClass = 'block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50 disabled:text-gray-400';
   const labelClass = 'block text-sm font-medium text-gray-700 mb-1';
 
   return (
@@ -90,33 +105,44 @@ export default function EmployeeModal({ employee, onSave, onClose }: Props) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>Full Name *</label>
-              <input className={inputClass} value={form.full_name}
-                onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))}
+              <label className={labelClass}>First Name *</label>
+              <input className={inputClass} value={form.first_name}
+                onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))}
                 required />
             </div>
             <div>
-              <label className={labelClass}>Email *</label>
-              <input className={inputClass} type="email" value={form.email}
-                onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+              <label className={labelClass}>Last Name *</label>
+              <input className={inputClass} value={form.last_name}
+                onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))}
                 required />
             </div>
           </div>
 
+          <div>
+            <label className={labelClass}>Email *</label>
+            <input className={inputClass} type="email" value={form.email}
+              onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+              required />
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>Job Title *</label>
-              <input className={inputClass} value={form.job_title}
-                onChange={e => setForm(f => ({ ...f, job_title: e.target.value }))}
-                required />
+              <label className={labelClass}>Department *</label>
+              <select className={inputClass} value={departmentID || ''}
+                onChange={e => handleDepartmentChange(Number(e.target.value))}
+                required>
+                <option value="">Select department...</option>
+                {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
             </div>
             <div>
-              <label className={labelClass}>Department *</label>
-              <select className={inputClass} value={form.department}
-                onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
+              <label className={labelClass}>Job Title *</label>
+              <select className={inputClass} value={form.job_title_id || ''}
+                onChange={e => setForm(f => ({ ...f, job_title_id: Number(e.target.value) }))}
+                disabled={!departmentID}
                 required>
-                <option value="">Select...</option>
-                {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                <option value="">{departmentID ? 'Select title...' : 'Select dept first'}</option>
+                {filteredJobTitles.map(jt => <option key={jt.id} value={jt.id}>{jt.name}</option>)}
               </select>
             </div>
           </div>
@@ -124,11 +150,11 @@ export default function EmployeeModal({ employee, onSave, onClose }: Props) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>Country *</label>
-              <select className={inputClass} value={form.country}
-                onChange={e => handleCountryChange(e.target.value)}
+              <select className={inputClass} value={form.country_id || ''}
+                onChange={e => setForm(f => ({ ...f, country_id: Number(e.target.value) }))}
                 required>
-                <option value="">Select...</option>
-                {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+                <option value="">Select country...</option>
+                {countries.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
@@ -149,9 +175,17 @@ export default function EmployeeModal({ employee, onSave, onClose }: Props) {
             </div>
             <div>
               <label className={labelClass}>Currency</label>
-              <input className={inputClass} value={form.currency} readOnly
-                title="Auto-set based on country" />
+              <input className={inputClass} value={selectedCurrency} disabled
+                placeholder="Auto from country"
+                title="Currency is derived from the selected country" />
             </div>
+          </div>
+
+          <div>
+            <label className={labelClass}>Address</label>
+            <input className={inputClass} value={form.address}
+              onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
+              placeholder="Optional" />
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t">

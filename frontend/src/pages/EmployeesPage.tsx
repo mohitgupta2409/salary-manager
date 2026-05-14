@@ -1,41 +1,42 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Search, Plus, Pencil, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { employeeApi } from '../api/client';
+import { useReferenceData } from '../api/useReferenceData';
 import type { Employee, EmployeeListResult } from '../types/employee';
 import EmployeeModal from '../components/EmployeeModal';
-
-const COUNTRIES = [
-  '', 'United States', 'India', 'United Kingdom', 'Germany', 'Canada',
-  'Australia', 'France', 'Japan', 'Singapore',
-];
 
 const PAGE_SIZE = 20;
 
 export default function EmployeesPage() {
+  const ref = useReferenceData();
+
   const [data, setData] = useState<EmployeeListResult | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const [country, setCountry] = useState('');
-  const [jobTitle, setJobTitle] = useState('');
+  const [countryID, setCountryID] = useState<number>(0);
+  const [departmentID, setDepartmentID] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [error, setError] = useState('');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setError('');
     try {
       const result = await employeeApi.list({
-        page, limit: PAGE_SIZE, search, country,
-        job_title: jobTitle,
+        page, limit: PAGE_SIZE, search,
+        country_id: countryID || undefined,
+        department_id: departmentID || undefined,
       });
       setData(result);
     } catch (err) {
-      console.error('Failed to fetch employees', err);
+      setError(err instanceof Error ? err.message : 'Failed to load employees');
     } finally {
       setLoading(false);
     }
-  }, [page, search, country, jobTitle]);
+  }, [page, search, countryID, departmentID]);
 
   useEffect(() => {
     fetchData();
@@ -43,7 +44,7 @@ export default function EmployeesPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, country, jobTitle]);
+  }, [search, countryID, departmentID]);
 
   const handleCreate = async (formData: Parameters<typeof employeeApi.create>[0]) => {
     await employeeApi.create(formData);
@@ -64,7 +65,8 @@ export default function EmployeesPage() {
 
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
 
-  const formatSalary = (salary: number, currency: string) => {
+  const formatSalary = (salary: number, currency?: string) => {
+    if (!currency) return salary.toLocaleString();
     try {
       return new Intl.NumberFormat('en-US', {
         style: 'currency', currency, maximumFractionDigits: 0,
@@ -80,14 +82,25 @@ export default function EmployeesPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Employees</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {data ? `${data.total.toLocaleString()} employees` : 'Loading...'}
+            {data ? `${data.total.toLocaleString()} active employees` : 'Loading...'}
           </p>
         </div>
-        <button onClick={() => { setEditingEmployee(null); setModalOpen(true); }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium shadow-sm">
+        <button
+          onClick={() => { setEditingEmployee(null); setModalOpen(true); }}
+          disabled={ref.loading}
+          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium shadow-sm disabled:opacity-50">
           <Plus className="w-4 h-4" /> Add Employee
         </button>
       </div>
+
+      {ref.error && (
+        <div className="bg-red-50 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">
+          Failed to load reference data: {ref.error}
+        </div>
+      )}
+      {error && (
+        <div className="bg-red-50 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">{error}</div>
+      )}
 
       {/* Filters */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
@@ -102,18 +115,16 @@ export default function EmployeesPage() {
               className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
             />
           </div>
-          <select value={country} onChange={e => setCountry(e.target.value)}
+          <select value={countryID} onChange={e => setCountryID(Number(e.target.value))}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none">
-            <option value="">All Countries</option>
-            {COUNTRIES.filter(Boolean).map(c => <option key={c} value={c}>{c}</option>)}
+            <option value={0}>All Countries</option>
+            {ref.countries.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <input
-            type="text"
-            placeholder="Filter by job title..."
-            value={jobTitle}
-            onChange={e => setJobTitle(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none min-w-[180px]"
-          />
+          <select value={departmentID} onChange={e => setDepartmentID(Number(e.target.value))}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none">
+            <option value={0}>All Departments</option>
+            {ref.departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
         </div>
       </div>
 
@@ -142,7 +153,7 @@ export default function EmployeesPage() {
               {!loading && data?.employees?.map(emp => (
                 <tr key={emp.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">{emp.full_name}</div>
+                    <div className="font-medium text-gray-900">{emp.first_name} {emp.last_name}</div>
                     <div className="text-xs text-gray-500">{emp.email}</div>
                   </td>
                   <td className="px-4 py-3 text-gray-700">{emp.job_title}</td>
@@ -178,12 +189,9 @@ export default function EmployeesPage() {
           </table>
         </div>
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
-            <p className="text-sm text-gray-600">
-              Page {page} of {totalPages}
-            </p>
+            <p className="text-sm text-gray-600">Page {page} of {totalPages}</p>
             <div className="flex gap-1">
               <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
                 className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed">
@@ -198,10 +206,12 @@ export default function EmployeesPage() {
         )}
       </div>
 
-      {/* Modals */}
       {modalOpen && (
         <EmployeeModal
           employee={editingEmployee}
+          countries={ref.countries}
+          departments={ref.departments}
+          jobTitles={ref.jobTitles}
           onSave={editingEmployee ? handleUpdate : handleCreate}
           onClose={() => { setModalOpen(false); setEditingEmployee(null); }}
         />
@@ -212,7 +222,7 @@ export default function EmployeesPage() {
           <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm mx-4">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Employee</h3>
             <p className="text-sm text-gray-600 mb-6">
-              Are you sure you want to delete this employee? This action cannot be undone.
+              This will mark the employee as inactive. They will no longer appear in lists or analytics, but their record is preserved.
             </p>
             <div className="flex justify-end gap-3">
               <button onClick={() => setDeleteConfirm(null)}

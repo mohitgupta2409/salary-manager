@@ -1,4 +1,7 @@
 import type {
+  Country,
+  Department,
+  JobTitle,
   Employee,
   EmployeeFormData,
   EmployeeListResult,
@@ -29,8 +32,9 @@ export const employeeApi = {
     params.set('page', String(filter.page));
     params.set('limit', String(filter.limit));
     if (filter.search) params.set('search', filter.search);
-    if (filter.country) params.set('country', filter.country);
-    if (filter.job_title) params.set('job_title', filter.job_title);
+    if (filter.country_id) params.set('country_id', String(filter.country_id));
+    if (filter.job_title_id) params.set('job_title_id', String(filter.job_title_id));
+    if (filter.department_id) params.set('department_id', String(filter.department_id));
     return request(`${BASE}/employees?${params}`);
   },
 
@@ -54,6 +58,27 @@ export const employeeApi = {
 
   delete(id: number): Promise<void> {
     return request(`${BASE}/employees/${id}`, { method: 'DELETE' });
+  },
+};
+
+export const countryApi = {
+  list(): Promise<Country[]> {
+    return request(`${BASE}/countries`);
+  },
+};
+
+export const departmentApi = {
+  list(): Promise<Department[]> {
+    return request(`${BASE}/departments`);
+  },
+};
+
+export const jobTitleApi = {
+  list(departmentId?: number): Promise<JobTitle[]> {
+    const params = new URLSearchParams();
+    if (departmentId) params.set('department_id', String(departmentId));
+    const qs = params.toString();
+    return request(`${BASE}/job-titles${qs ? '?' + qs : ''}`);
   },
 };
 

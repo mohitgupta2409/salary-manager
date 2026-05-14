@@ -1,25 +1,60 @@
-export interface Employee {
+export interface Country {
   id: number;
-  full_name: string;
-  email: string;
-  job_title: string;
-  department: string;
-  country: string;
-  salary: number;
+  name: string;
+  code: string;
   currency: string;
-  join_date: string;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
 
-export interface EmployeeFormData {
-  full_name: string;
+export interface Department {
+  id: number;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobTitle {
+  id: number;
+  name: string;
+  department_id: number;
+  department?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Employee {
+  id: number;
+  first_name: string;
+  last_name: string;
   email: string;
-  job_title: string;
-  department: string;
-  country: string;
+  job_title_id: number;
+  country_id: number;
   salary: number;
-  currency: string;
+  address?: string;
+  join_date: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+
+  // Denormalized fields populated by the backend via JOINs
+  job_title?: string;
+  department?: string;
+  country?: string;
+  currency?: string;
+}
+
+export interface EmployeeFormData {
+  first_name: string;
+  last_name: string;
+  email: string;
+  job_title_id: number;
+  country_id: number;
+  salary: number;
+  address: string;
   join_date: string;
 }
 
@@ -32,8 +67,9 @@ export interface EmployeeListResult {
 
 export interface EmployeeFilter {
   search?: string;
-  country?: string;
-  job_title?: string;
+  country_id?: number;
+  job_title_id?: number;
+  department_id?: number;
   page: number;
   limit: number;
 }
