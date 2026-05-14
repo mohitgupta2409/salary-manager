@@ -23,59 +23,11 @@ func NewEmployeeHandler(svc *service.EmployeeService) *EmployeeHandler {
 
 func (h *EmployeeHandler) Routes() chi.Router {
 	r := chi.NewRouter()
-
 	r.Post("/", h.Create)
 	r.Get("/", h.List)
 	r.Get("/{id}", h.GetByID)
 	r.Put("/{id}", h.Update)
 	r.Delete("/{id}", h.Delete)
-
-	return r
-}
-
-func InsightsRoutes(svc *service.EmployeeService) chi.Router {
-	r := chi.NewRouter()
-
-	r.Get("/salary-range", func(w http.ResponseWriter, req *http.Request) {
-		country := req.URL.Query().Get("country")
-		result, err := svc.GetSalaryRangeByCountry(req.Context(), country)
-		if err != nil {
-			handleServiceError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, result)
-	})
-
-	r.Get("/salary-by-title", func(w http.ResponseWriter, req *http.Request) {
-		country := req.URL.Query().Get("country")
-		jobTitle := req.URL.Query().Get("job_title")
-		result, err := svc.GetSalaryByTitle(req.Context(), country, jobTitle)
-		if err != nil {
-			handleServiceError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, result)
-	})
-
-	r.Get("/department-stats", func(w http.ResponseWriter, req *http.Request) {
-		country := req.URL.Query().Get("country")
-		result, err := svc.GetDepartmentStats(req.Context(), country)
-		if err != nil {
-			handleServiceError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, result)
-	})
-
-	r.Get("/summary", func(w http.ResponseWriter, req *http.Request) {
-		result, err := svc.GetOrgSummary(req.Context())
-		if err != nil {
-			handleServiceError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, result)
-	})
-
 	return r
 }
 
@@ -85,7 +37,6 @@ func (h *EmployeeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse("invalid JSON body"))
 		return
 	}
-
 	if err := h.svc.Create(r.Context(), &emp); err != nil {
 		handleServiceError(w, err)
 		return
@@ -99,7 +50,6 @@ func (h *EmployeeHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse("invalid id"))
 		return
 	}
-
 	emp, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
 		handleServiceError(w, err)
@@ -114,14 +64,12 @@ func (h *EmployeeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse("invalid id"))
 		return
 	}
-
 	var emp model.Employee
 	if err := json.NewDecoder(r.Body).Decode(&emp); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse("invalid JSON body"))
 		return
 	}
 	emp.ID = id
-
 	if err := h.svc.Update(r.Context(), &emp); err != nil {
 		handleServiceError(w, err)
 		return
@@ -135,7 +83,6 @@ func (h *EmployeeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse("invalid id"))
 		return
 	}
-
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		handleServiceError(w, err)
 		return
@@ -144,20 +91,32 @@ func (h *EmployeeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *EmployeeHandler) List(w http.ResponseWriter, r *http.Request) {
-	filter := model.EmployeeFilter{
-		Search:   r.URL.Query().Get("search"),
-		Country:  r.URL.Query().Get("country"),
-		JobTitle: r.URL.Query().Get("job_title"),
-	}
+	q := r.URL.Query()
+	filter := model.EmployeeFilter{Search: q.Get("search")}
 
-	if p := r.URL.Query().Get("page"); p != "" {
-		if page, err := strconv.Atoi(p); err == nil {
-			filter.Page = page
+	if v := q.Get("country_id"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			filter.CountryID = id
 		}
 	}
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if limit, err := strconv.Atoi(l); err == nil {
-			filter.Limit = limit
+	if v := q.Get("job_title_id"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			filter.JobTitleID = id
+		}
+	}
+	if v := q.Get("department_id"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			filter.DepartmentID = id
+		}
+	}
+	if v := q.Get("page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			filter.Page = n
+		}
+	}
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			filter.Limit = n
 		}
 	}
 
@@ -183,16 +142,30 @@ func handleServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrDuplicateEmail):
 		writeJSON(w, http.StatusConflict, errorResponse(err.Error()))
 	default:
-		if err.Error() == "full name is required" || err.Error() == "email is required" ||
-			err.Error() == "email must be valid" || err.Error() == "job title is required" ||
-			err.Error() == "department is required" || err.Error() == "country is required" ||
-			err.Error() == "salary must be non-negative" {
+		if isValidationError(err.Error()) {
 			writeJSON(w, http.StatusBadRequest, errorResponse(err.Error()))
 			return
 		}
 		log.Printf("internal error: %v", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse("internal server error"))
 	}
+}
+
+func isValidationError(msg string) bool {
+	switch msg {
+	case "first name is required", "last name is required",
+		"email is required", "email must be valid",
+		"job title is required", "country is required",
+		"department is required", "salary must be non-negative",
+		"country does not exist or is inactive",
+		"job title does not exist or is inactive",
+		"department does not exist or is inactive",
+		"country name is required", "country code is required",
+		"currency is required", "department name is required",
+		"job title name is required":
+		return true
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

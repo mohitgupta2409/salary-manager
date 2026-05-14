@@ -10,28 +10,41 @@ import (
 )
 
 var (
-	ErrInvalidInput  = errors.New("invalid input")
-	ErrNotFound      = errors.New("employee not found")
+	ErrInvalidInput   = errors.New("invalid input")
+	ErrNotFound       = errors.New("employee not found")
 	ErrDuplicateEmail = errors.New("email already exists")
 )
 
 type EmployeeService struct {
-	repo repository.EmployeeRepository
+	repo         repository.EmployeeRepository
+	countryRepo  repository.CountryRepository
+	jobTitleRepo repository.JobTitleRepository
 }
 
-func NewEmployeeService(repo repository.EmployeeRepository) *EmployeeService {
-	return &EmployeeService{repo: repo}
+func NewEmployeeService(
+	repo repository.EmployeeRepository,
+	countryRepo repository.CountryRepository,
+	jobTitleRepo repository.JobTitleRepository,
+) *EmployeeService {
+	return &EmployeeService{
+		repo:         repo,
+		countryRepo:  countryRepo,
+		jobTitleRepo: jobTitleRepo,
+	}
 }
 
 func (s *EmployeeService) Create(ctx context.Context, emp *model.Employee) error {
 	if err := validateEmployee(emp); err != nil {
 		return err
 	}
-	emp.Email = strings.ToLower(strings.TrimSpace(emp.Email))
-	emp.FullName = strings.TrimSpace(emp.FullName)
+	normalize(emp)
+
+	if err := s.validateForeignKeys(ctx, emp); err != nil {
+		return err
+	}
 
 	if err := s.repo.Create(ctx, emp); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		if isUniqueViolation(err) {
 			return ErrDuplicateEmail
 		}
 		return err
@@ -60,14 +73,17 @@ func (s *EmployeeService) Update(ctx context.Context, emp *model.Employee) error
 	if err := validateEmployee(emp); err != nil {
 		return err
 	}
-	emp.Email = strings.ToLower(strings.TrimSpace(emp.Email))
-	emp.FullName = strings.TrimSpace(emp.FullName)
+	normalize(emp)
+
+	if err := s.validateForeignKeys(ctx, emp); err != nil {
+		return err
+	}
 
 	if err := s.repo.Update(ctx, emp); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return ErrNotFound
 		}
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		if isUniqueViolation(err) {
 			return ErrDuplicateEmail
 		}
 		return err
@@ -75,11 +91,12 @@ func (s *EmployeeService) Update(ctx context.Context, emp *model.Employee) error
 	return nil
 }
 
+// Delete performs a soft delete (sets is_active = 0).
 func (s *EmployeeService) Delete(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return ErrInvalidInput
 	}
-	if err := s.repo.Delete(ctx, id); err != nil {
+	if err := s.repo.SoftDelete(ctx, id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return ErrNotFound
 		}
@@ -120,9 +137,37 @@ func (s *EmployeeService) GetOrgSummary(ctx context.Context) (*model.OrgSummary,
 	return s.repo.GetOrgSummary(ctx)
 }
 
+// validateForeignKeys ensures the referenced country and job title exist
+// and are active. This catches bad FK values with a clean error before the
+// DB raises a constraint violation.
+func (s *EmployeeService) validateForeignKeys(ctx context.Context, emp *model.Employee) error {
+	if s.countryRepo != nil {
+		c, err := s.countryRepo.GetByID(ctx, emp.CountryID)
+		if err != nil {
+			return err
+		}
+		if c == nil || !c.IsActive {
+			return errors.New("country does not exist or is inactive")
+		}
+	}
+	if s.jobTitleRepo != nil {
+		jt, err := s.jobTitleRepo.GetByID(ctx, emp.JobTitleID)
+		if err != nil {
+			return err
+		}
+		if jt == nil || !jt.IsActive {
+			return errors.New("job title does not exist or is inactive")
+		}
+	}
+	return nil
+}
+
 func validateEmployee(emp *model.Employee) error {
-	if strings.TrimSpace(emp.FullName) == "" {
-		return errors.New("full name is required")
+	if strings.TrimSpace(emp.FirstName) == "" {
+		return errors.New("first name is required")
+	}
+	if strings.TrimSpace(emp.LastName) == "" {
+		return errors.New("last name is required")
 	}
 	if strings.TrimSpace(emp.Email) == "" {
 		return errors.New("email is required")
@@ -130,20 +175,25 @@ func validateEmployee(emp *model.Employee) error {
 	if !strings.Contains(emp.Email, "@") {
 		return errors.New("email must be valid")
 	}
-	if strings.TrimSpace(emp.JobTitle) == "" {
+	if emp.JobTitleID <= 0 {
 		return errors.New("job title is required")
 	}
-	if strings.TrimSpace(emp.Department) == "" {
-		return errors.New("department is required")
-	}
-	if strings.TrimSpace(emp.Country) == "" {
+	if emp.CountryID <= 0 {
 		return errors.New("country is required")
 	}
 	if emp.Salary < 0 {
 		return errors.New("salary must be non-negative")
 	}
-	if strings.TrimSpace(emp.Currency) == "" {
-		emp.Currency = "USD"
-	}
 	return nil
+}
+
+func normalize(emp *model.Employee) {
+	emp.Email = strings.ToLower(strings.TrimSpace(emp.Email))
+	emp.FirstName = strings.TrimSpace(emp.FirstName)
+	emp.LastName = strings.TrimSpace(emp.LastName)
+	emp.Address = strings.TrimSpace(emp.Address)
+}
+
+func isUniqueViolation(err error) bool {
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

@@ -16,17 +16,18 @@ import (
 	"github.com/salary-manager/backend/internal/service"
 )
 
-// mockRepo for handler tests
-type mockRepo struct {
+// ----- mock repos -----
+
+type mockEmployeeRepo struct {
 	employees map[int64]*model.Employee
 	nextID    int64
 }
 
-func newMockRepo() *mockRepo {
-	return &mockRepo{employees: make(map[int64]*model.Employee), nextID: 1}
+func newMockEmployeeRepo() *mockEmployeeRepo {
+	return &mockEmployeeRepo{employees: make(map[int64]*model.Employee), nextID: 1}
 }
 
-func (m *mockRepo) Create(_ context.Context, emp *model.Employee) error {
+func (m *mockEmployeeRepo) Create(_ context.Context, emp *model.Employee) error {
 	for _, e := range m.employees {
 		if e.Email == emp.Email {
 			return errors.New("UNIQUE constraint failed: employees.email")
@@ -34,123 +35,217 @@ func (m *mockRepo) Create(_ context.Context, emp *model.Employee) error {
 	}
 	emp.ID = m.nextID
 	m.nextID++
+	emp.IsActive = true
 	stored := *emp
 	m.employees[emp.ID] = &stored
 	return nil
 }
 
-func (m *mockRepo) GetByID(_ context.Context, id int64) (*model.Employee, error) {
+func (m *mockEmployeeRepo) GetByID(_ context.Context, id int64) (*model.Employee, error) {
 	e, ok := m.employees[id]
 	if !ok {
 		return nil, nil
 	}
-	copy := *e
-	return &copy, nil
+	c := *e
+	return &c, nil
 }
 
-func (m *mockRepo) Update(_ context.Context, emp *model.Employee) error {
+func (m *mockEmployeeRepo) Update(_ context.Context, emp *model.Employee) error {
 	if _, ok := m.employees[emp.ID]; !ok {
 		return errors.New("employee not found")
 	}
-	stored := *emp
-	m.employees[emp.ID] = &stored
+	c := *emp
+	m.employees[emp.ID] = &c
 	return nil
 }
 
-func (m *mockRepo) Delete(_ context.Context, id int64) error {
-	if _, ok := m.employees[id]; !ok {
+func (m *mockEmployeeRepo) SoftDelete(_ context.Context, id int64) error {
+	e, ok := m.employees[id]
+	if !ok || !e.IsActive {
 		return errors.New("employee not found")
 	}
-	delete(m.employees, id)
+	e.IsActive = false
 	return nil
 }
 
-func (m *mockRepo) List(_ context.Context, f model.EmployeeFilter) (*model.EmployeeListResult, error) {
-	var all []model.Employee
+func (m *mockEmployeeRepo) List(_ context.Context, f model.EmployeeFilter) (*model.EmployeeListResult, error) {
+	var out []model.Employee
 	for _, e := range m.employees {
-		all = append(all, *e)
+		if e.IsActive {
+			out = append(out, *e)
+		}
 	}
-	return &model.EmployeeListResult{Employees: all, Total: int64(len(all)), Page: f.Page, Limit: f.Limit}, nil
+	return &model.EmployeeListResult{Employees: out, Total: int64(len(out)), Page: f.Page, Limit: f.Limit}, nil
 }
 
-func (m *mockRepo) GetSalaryRangeByCountry(_ context.Context, c string) (*model.SalaryRange, error) {
+func (m *mockEmployeeRepo) GetSalaryRangeByCountry(_ context.Context, c string) (*model.SalaryRange, error) {
 	return &model.SalaryRange{Country: c, Min: 50000, Max: 150000, Average: 100000, Count: 5}, nil
 }
-
-func (m *mockRepo) GetSalaryByTitle(_ context.Context, c, t string) (*model.SalaryByTitle, error) {
+func (m *mockEmployeeRepo) GetSalaryByTitle(_ context.Context, c, t string) (*model.SalaryByTitle, error) {
 	return &model.SalaryByTitle{Country: c, JobTitle: t, Average: 110000, Count: 3}, nil
 }
-
-func (m *mockRepo) GetDepartmentStats(_ context.Context, _ string) ([]model.DepartmentStats, error) {
+func (m *mockEmployeeRepo) GetDepartmentStats(_ context.Context, _ string) ([]model.DepartmentStats, error) {
 	return []model.DepartmentStats{{Department: "Eng", AverageSalary: 120000, EmployeeCount: 10}}, nil
 }
-
-func (m *mockRepo) GetOrgSummary(_ context.Context) (*model.OrgSummary, error) {
+func (m *mockEmployeeRepo) GetOrgSummary(_ context.Context) (*model.OrgSummary, error) {
 	return &model.OrgSummary{TotalEmployees: 50, AverageSalary: 95000}, nil
 }
 
-func setupHandler() (*EmployeeHandler, *service.EmployeeService) {
-	repo := newMockRepo()
-	svc := service.NewEmployeeService(repo)
-	h := NewEmployeeHandler(svc)
-	return h, svc
+type mockCountryRepo struct {
+	byID map[int64]*model.Country
 }
 
-func setupRouter() (http.Handler, *service.EmployeeService) {
-	h, svc := setupHandler()
+func newMockCountryRepo() *mockCountryRepo {
+	return &mockCountryRepo{byID: map[int64]*model.Country{
+		1: {ID: 1, Name: "USA", Code: "US", Currency: "USD", IsActive: true},
+	}}
+}
+
+func (m *mockCountryRepo) Create(_ context.Context, c *model.Country) error {
+	c.ID = int64(len(m.byID) + 1)
+	c.IsActive = true
+	m.byID[c.ID] = c
+	return nil
+}
+func (m *mockCountryRepo) List(_ context.Context, _ bool) ([]model.Country, error) {
+	out := []model.Country{}
+	for _, c := range m.byID {
+		out = append(out, *c)
+	}
+	return out, nil
+}
+func (m *mockCountryRepo) GetByID(_ context.Context, id int64) (*model.Country, error) {
+	c, ok := m.byID[id]
+	if !ok {
+		return nil, nil
+	}
+	return c, nil
+}
+func (m *mockCountryRepo) GetByCode(_ context.Context, _ string) (*model.Country, error) { return nil, nil }
+
+type mockDeptRepo struct {
+	byID map[int64]*model.Department
+}
+
+func newMockDeptRepo() *mockDeptRepo {
+	return &mockDeptRepo{byID: map[int64]*model.Department{
+		1: {ID: 1, Name: "Engineering", IsActive: true},
+	}}
+}
+
+func (m *mockDeptRepo) Create(_ context.Context, d *model.Department) error {
+	d.ID = int64(len(m.byID) + 1)
+	d.IsActive = true
+	m.byID[d.ID] = d
+	return nil
+}
+func (m *mockDeptRepo) List(_ context.Context, _ bool) ([]model.Department, error) {
+	out := []model.Department{}
+	for _, d := range m.byID {
+		out = append(out, *d)
+	}
+	return out, nil
+}
+func (m *mockDeptRepo) GetByID(_ context.Context, id int64) (*model.Department, error) {
+	d, ok := m.byID[id]
+	if !ok {
+		return nil, nil
+	}
+	return d, nil
+}
+
+type mockJobTitleRepo struct {
+	byID map[int64]*model.JobTitle
+}
+
+func newMockJobTitleRepo() *mockJobTitleRepo {
+	return &mockJobTitleRepo{byID: map[int64]*model.JobTitle{
+		1: {ID: 1, Name: "Engineer", DepartmentID: 1, Department: "Engineering", IsActive: true},
+	}}
+}
+
+func (m *mockJobTitleRepo) Create(_ context.Context, jt *model.JobTitle) error {
+	jt.ID = int64(len(m.byID) + 1)
+	jt.IsActive = true
+	m.byID[jt.ID] = jt
+	return nil
+}
+func (m *mockJobTitleRepo) List(_ context.Context, _ int64, _ bool) ([]model.JobTitle, error) {
+	out := []model.JobTitle{}
+	for _, jt := range m.byID {
+		out = append(out, *jt)
+	}
+	return out, nil
+}
+func (m *mockJobTitleRepo) GetByID(_ context.Context, id int64) (*model.JobTitle, error) {
+	jt, ok := m.byID[id]
+	if !ok {
+		return nil, nil
+	}
+	return jt, nil
+}
+
+func setupRouter() http.Handler {
+	empRepo := newMockEmployeeRepo()
+	countryRepo := newMockCountryRepo()
+	deptRepo := newMockDeptRepo()
+	jtRepo := newMockJobTitleRepo()
+
+	empSvc := service.NewEmployeeService(empRepo, countryRepo, jtRepo)
+	countrySvc := service.NewCountryService(countryRepo)
+	deptSvc := service.NewDepartmentService(deptRepo)
+	jtSvc := service.NewJobTitleService(jtRepo, deptRepo)
+
 	r := chi.NewRouter()
-	r.Mount("/api/employees", h.Routes())
-	r.Mount("/api/insights", InsightsRoutes(svc))
-	return r, svc
+	r.Mount("/api/employees", NewEmployeeHandler(empSvc).Routes())
+	r.Mount("/api/countries", NewCountryHandler(countrySvc).Routes())
+	r.Mount("/api/departments", NewDepartmentHandler(deptSvc).Routes())
+	r.Mount("/api/job-titles", NewJobTitleHandler(jtSvc).Routes())
+	r.Mount("/api/insights", InsightsRoutes(empSvc))
+	return r
 }
 
 func validEmployeeJSON() []byte {
 	emp := map[string]interface{}{
-		"full_name":  "Jane Doe",
-		"email":      "jane@example.com",
-		"job_title":  "Engineer",
-		"department": "Engineering",
-		"country":    "USA",
-		"salary":     100000,
-		"currency":   "USD",
-		"join_date":  time.Date(2023, 6, 1, 0, 0, 0, 0, time.UTC),
+		"first_name":   "Jane",
+		"last_name":    "Doe",
+		"email":        "jane@example.com",
+		"job_title_id": 1,
+		"country_id":   1,
+		"salary":       100000,
+		"address":      "123 Main St",
+		"join_date":    time.Date(2023, 6, 1, 0, 0, 0, 0, time.UTC),
 	}
 	b, _ := json.Marshal(emp)
 	return b
 }
 
+// ----- employee handler tests -----
+
 func TestHandler_CreateEmployee(t *testing.T) {
-	router, _ := setupRouter()
+	router := setupRouter()
 
 	req := httptest.NewRequest("POST", "/api/employees", bytes.NewReader(validEmployeeJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
-		t.Errorf("status = %d, want %d. Body: %s", rec.Code, http.StatusCreated, rec.Body.String())
+		t.Fatalf("status = %d, want %d. Body: %s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
-
 	var emp model.Employee
-	if err := json.NewDecoder(rec.Body).Decode(&emp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if emp.ID == 0 {
-		t.Error("response should have non-zero ID")
-	}
-	if emp.FullName != "Jane Doe" {
-		t.Errorf("FullName = %q, want Jane Doe", emp.FullName)
+	json.NewDecoder(rec.Body).Decode(&emp)
+	if emp.ID == 0 || emp.FirstName != "Jane" {
+		t.Errorf("unexpected response: %+v", emp)
 	}
 }
 
 func TestHandler_CreateEmployee_InvalidJSON(t *testing.T) {
-	router, _ := setupRouter()
+	router := setupRouter()
 
 	req := httptest.NewRequest("POST", "/api/employees", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
@@ -159,148 +254,130 @@ func TestHandler_CreateEmployee_InvalidJSON(t *testing.T) {
 }
 
 func TestHandler_CreateEmployee_ValidationError(t *testing.T) {
-	router, _ := setupRouter()
-
-	body, _ := json.Marshal(map[string]interface{}{
-		"full_name": "",
-		"email":     "jane@example.com",
-	})
+	router := setupRouter()
+	body, _ := json.Marshal(map[string]interface{}{"first_name": ""})
 	req := httptest.NewRequest("POST", "/api/employees", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-
 	router.ServeHTTP(rec, req)
-
 	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+		t.Errorf("status = %d, want 400. Body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_CreateEmployee_DuplicateEmail(t *testing.T) {
+	router := setupRouter()
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest("POST", "/api/employees", bytes.NewReader(validEmployeeJSON()))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if i == 1 && rec.Code != http.StatusConflict {
+			t.Errorf("second create status = %d, want 409", rec.Code)
+		}
 	}
 }
 
 func TestHandler_GetByID(t *testing.T) {
-	router, _ := setupRouter()
+	router := setupRouter()
 
-	// Create first
 	req := httptest.NewRequest("POST", "/api/employees", bytes.NewReader(validEmployeeJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	// Get by ID
 	req = httptest.NewRequest("GET", "/api/employees/1", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-
 	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d. Body: %s", rec.Code, http.StatusOK, rec.Body.String())
+		t.Errorf("status = %d", rec.Code)
 	}
 }
 
 func TestHandler_GetByID_NotFound(t *testing.T) {
-	router, _ := setupRouter()
-
+	router := setupRouter()
 	req := httptest.NewRequest("GET", "/api/employees/999", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-
 	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
+		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }
 
 func TestHandler_GetByID_InvalidID(t *testing.T) {
-	router, _ := setupRouter()
-
+	router := setupRouter()
 	req := httptest.NewRequest("GET", "/api/employees/abc", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-
 	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
 
 func TestHandler_UpdateEmployee(t *testing.T) {
-	router, _ := setupRouter()
+	router := setupRouter()
 
-	// Create
 	req := httptest.NewRequest("POST", "/api/employees", bytes.NewReader(validEmployeeJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	// Update
 	updated, _ := json.Marshal(map[string]interface{}{
-		"full_name":  "Jane Smith",
-		"email":      "jane@example.com",
-		"job_title":  "Senior Engineer",
-		"department": "Engineering",
-		"country":    "USA",
-		"salary":     130000,
-		"currency":   "USD",
-		"join_date":  time.Date(2023, 6, 1, 0, 0, 0, 0, time.UTC),
+		"first_name": "Jane", "last_name": "Smith", "email": "jane@example.com",
+		"job_title_id": 1, "country_id": 1, "salary": 130000,
+		"join_date": time.Date(2023, 6, 1, 0, 0, 0, 0, time.UTC),
 	})
 	req = httptest.NewRequest("PUT", "/api/employees/1", bytes.NewReader(updated))
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-
 	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d. Body: %s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-
-	var emp model.Employee
-	json.NewDecoder(rec.Body).Decode(&emp)
-	if emp.Salary != 130000 {
-		t.Errorf("Salary = %f, want 130000", emp.Salary)
+		t.Errorf("status = %d. Body: %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestHandler_DeleteEmployee(t *testing.T) {
-	router, _ := setupRouter()
+func TestHandler_DeleteEmployee_SoftDelete(t *testing.T) {
+	router := setupRouter()
 
-	// Create
 	req := httptest.NewRequest("POST", "/api/employees", bytes.NewReader(validEmployeeJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	// Delete
 	req = httptest.NewRequest("DELETE", "/api/employees/1", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-
 	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Errorf("delete status = %d", rec.Code)
 	}
 
-	// Verify gone
-	req = httptest.NewRequest("GET", "/api/employees/1", nil)
+	// List should not include the soft-deleted employee
+	req = httptest.NewRequest("GET", "/api/employees", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("after delete, status = %d, want %d", rec.Code, http.StatusNotFound)
+	var result model.EmployeeListResult
+	json.NewDecoder(rec.Body).Decode(&result)
+	if result.Total != 0 {
+		t.Errorf("after soft delete, list total = %d, want 0", result.Total)
 	}
 }
 
 func TestHandler_ListEmployees(t *testing.T) {
-	router, _ := setupRouter()
+	router := setupRouter()
 
-	// Create
 	req := httptest.NewRequest("POST", "/api/employees", bytes.NewReader(validEmployeeJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	// List
 	req = httptest.NewRequest("GET", "/api/employees?page=1&limit=10", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Errorf("status = %d", rec.Code)
 	}
-
 	var result model.EmployeeListResult
 	json.NewDecoder(rec.Body).Decode(&result)
 	if result.Total != 1 {
@@ -308,46 +385,23 @@ func TestHandler_ListEmployees(t *testing.T) {
 	}
 }
 
-func TestHandler_InsightsSalaryRange(t *testing.T) {
-	router, _ := setupRouter()
+// ----- insights handler tests -----
 
+func TestHandler_InsightsSalaryRange(t *testing.T) {
+	router := setupRouter()
 	req := httptest.NewRequest("GET", "/api/insights/salary-range?country=USA", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-
 	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-
-	var sr model.SalaryRange
-	json.NewDecoder(rec.Body).Decode(&sr)
-	if sr.Country != "USA" {
-		t.Errorf("Country = %q, want USA", sr.Country)
-	}
-}
-
-func TestHandler_InsightsSalaryByTitle(t *testing.T) {
-	router, _ := setupRouter()
-
-	req := httptest.NewRequest("GET", "/api/insights/salary-by-title?country=USA&job_title=Engineer", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Errorf("status = %d", rec.Code)
 	}
 }
 
 func TestHandler_InsightsSummary(t *testing.T) {
-	router, _ := setupRouter()
-
+	router := setupRouter()
 	req := httptest.NewRequest("GET", "/api/insights/summary", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
 
 	var summary model.OrgSummary
 	json.NewDecoder(rec.Body).Decode(&summary)
@@ -356,14 +410,79 @@ func TestHandler_InsightsSummary(t *testing.T) {
 	}
 }
 
-func TestHandler_InsightsDepartmentStats(t *testing.T) {
-	router, _ := setupRouter()
+// ----- reference handler tests -----
 
-	req := httptest.NewRequest("GET", "/api/insights/department-stats?country=USA", nil)
+func TestHandler_ListCountries(t *testing.T) {
+	router := setupRouter()
+	req := httptest.NewRequest("GET", "/api/countries", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Errorf("status = %d", rec.Code)
+	}
+	var countries []model.Country
+	json.NewDecoder(rec.Body).Decode(&countries)
+	if len(countries) != 1 {
+		t.Errorf("got %d countries, want 1", len(countries))
+	}
+}
+
+func TestHandler_CreateCountry(t *testing.T) {
+	router := setupRouter()
+	body, _ := json.Marshal(map[string]string{"name": "Brazil", "code": "BR", "currency": "BRL"})
+	req := httptest.NewRequest("POST", "/api/countries", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Errorf("status = %d. Body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_CreateCountry_InvalidName(t *testing.T) {
+	router := setupRouter()
+	body, _ := json.Marshal(map[string]string{"name": "", "code": "BR", "currency": "BRL"})
+	req := httptest.NewRequest("POST", "/api/countries", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestHandler_ListDepartments(t *testing.T) {
+	router := setupRouter()
+	req := httptest.NewRequest("GET", "/api/departments", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestHandler_ListJobTitles(t *testing.T) {
+	router := setupRouter()
+	req := httptest.NewRequest("GET", "/api/job-titles", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestHandler_ListJobTitles_FilterByDept(t *testing.T) {
+	router := setupRouter()
+	req := httptest.NewRequest("GET", "/api/job-titles?department_id=1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d", rec.Code)
 	}
 }

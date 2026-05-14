@@ -20,9 +20,23 @@ func main() {
 	}
 	defer db.Close()
 
-	repo := sqlite.NewEmployeeRepository(db)
-	svc := service.NewEmployeeService(repo)
-	empHandler := handler.NewEmployeeHandler(svc)
+	// Repositories
+	empRepo := sqlite.NewEmployeeRepository(db)
+	countryRepo := sqlite.NewCountryRepository(db)
+	deptRepo := sqlite.NewDepartmentRepository(db)
+	jobTitleRepo := sqlite.NewJobTitleRepository(db)
+
+	// Services
+	empSvc := service.NewEmployeeService(empRepo, countryRepo, jobTitleRepo)
+	countrySvc := service.NewCountryService(countryRepo)
+	deptSvc := service.NewDepartmentService(deptRepo)
+	jobTitleSvc := service.NewJobTitleService(jobTitleRepo, deptRepo)
+
+	// Handlers
+	empHandler := handler.NewEmployeeHandler(empSvc)
+	countryHandler := handler.NewCountryHandler(countrySvc)
+	deptHandler := handler.NewDepartmentHandler(deptSvc)
+	jobTitleHandler := handler.NewJobTitleHandler(jobTitleSvc)
 
 	r := chi.NewRouter()
 
@@ -39,7 +53,10 @@ func main() {
 	}))
 
 	r.Mount("/api/employees", empHandler.Routes())
-	r.Mount("/api/insights", handler.InsightsRoutes(svc))
+	r.Mount("/api/countries", countryHandler.Routes())
+	r.Mount("/api/departments", deptHandler.Routes())
+	r.Mount("/api/job-titles", jobTitleHandler.Routes())
+	r.Mount("/api/insights", handler.InsightsRoutes(empSvc))
 
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

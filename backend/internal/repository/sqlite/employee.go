@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
-
 	"github.com/salary-manager/backend/internal/model"
 	"github.com/salary-manager/backend/internal/repository"
 )
@@ -21,79 +19,87 @@ func NewEmployeeRepository(db *sql.DB) repository.EmployeeRepository {
 	return &employeeRepo{db: db}
 }
 
-func InitDB(dataSourceName string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", dataSourceName+"?_journal_mode=WAL&_foreign_keys=on")
+// Common SELECT used by all read paths. Joins employee with its referenced
+// country, job_title, and department so callers receive denormalized fields
+// (country name, currency, job title, department) in a single round-trip.
+const employeeSelectClause = `
+	SELECT e.id, e.first_name, e.last_name, e.email,
+	       e.job_title_id, e.country_id, e.salary, e.address,
+	       e.join_date, e.is_active, e.created_at, e.updated_at,
+	       jt.name AS job_title, d.name AS department,
+	       c.name AS country, c.currency AS currency
+	FROM employees e
+	JOIN job_titles  jt ON e.job_title_id  = jt.id
+	JOIN departments d  ON jt.department_id = d.id
+	JOIN countries   c  ON e.country_id    = c.id
+`
+
+func scanEmployee(rows interface {
+	Scan(dest ...interface{}) error
+}) (*model.Employee, error) {
+	var e model.Employee
+	var address sql.NullString
+	err := rows.Scan(
+		&e.ID, &e.FirstName, &e.LastName, &e.Email,
+		&e.JobTitleID, &e.CountryID, &e.Salary, &address,
+		&e.JoinDate, &e.IsActive, &e.CreatedAt, &e.UpdatedAt,
+		&e.JobTitle, &e.Department, &e.Country, &e.Currency,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
+		return nil, err
 	}
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("ping database: %w", err)
+	if address.Valid {
+		e.Address = address.String
 	}
-	if err := runMigrations(db); err != nil {
-		return nil, fmt.Errorf("run migrations: %w", err)
-	}
-	return db, nil
-}
-
-func runMigrations(db *sql.DB) error {
-	query := `
-	CREATE TABLE IF NOT EXISTS employees (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		full_name TEXT NOT NULL,
-		email TEXT NOT NULL UNIQUE,
-		job_title TEXT NOT NULL,
-		department TEXT NOT NULL,
-		country TEXT NOT NULL,
-		salary REAL NOT NULL CHECK(salary >= 0),
-		currency TEXT NOT NULL DEFAULT 'USD',
-		join_date DATETIME NOT NULL,
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_employees_country ON employees(country);
-	CREATE INDEX IF NOT EXISTS idx_employees_job_title ON employees(job_title);
-	CREATE INDEX IF NOT EXISTS idx_employees_department ON employees(department);
-	CREATE INDEX IF NOT EXISTS idx_employees_email ON employees(email);
-	`
-	_, err := db.Exec(query)
-	return err
+	return &e, nil
 }
 
 func (r *employeeRepo) Create(ctx context.Context, emp *model.Employee) error {
 	now := time.Now().UTC()
 	emp.CreatedAt = now
 	emp.UpdatedAt = now
+	emp.IsActive = true
 
-	result, err := r.db.ExecContext(ctx, `
-		INSERT INTO employees (full_name, email, job_title, department, country, salary, currency, join_date, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		emp.FullName, emp.Email, emp.JobTitle, emp.Department, emp.Country,
-		emp.Salary, emp.Currency, emp.JoinDate, emp.CreatedAt, emp.UpdatedAt,
+	var address interface{}
+	if emp.Address != "" {
+		address = emp.Address
+	}
+
+	res, err := r.db.ExecContext(ctx, `
+		INSERT INTO employees (first_name, last_name, email, job_title_id, country_id,
+		                       salary, address, join_date, is_active, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+		emp.FirstName, emp.LastName, emp.Email, emp.JobTitleID, emp.CountryID,
+		emp.Salary, address, emp.JoinDate, emp.CreatedAt, emp.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert employee: %w", err)
 	}
-	id, err := result.LastInsertId()
+	id, err := res.LastInsertId()
 	if err != nil {
-		return fmt.Errorf("get last insert id: %w", err)
+		return fmt.Errorf("last insert id: %w", err)
 	}
 	emp.ID = id
+
+	// Hydrate denormalized fields by re-fetching
+	fresh, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if fresh != nil {
+		*emp = *fresh
+	}
 	return nil
 }
 
 func (r *employeeRepo) GetByID(ctx context.Context, id int64) (*model.Employee, error) {
-	emp := &model.Employee{}
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, full_name, email, job_title, department, country, salary, currency, join_date, created_at, updated_at
-		FROM employees WHERE id = ?`, id,
-	).Scan(&emp.ID, &emp.FullName, &emp.Email, &emp.JobTitle, &emp.Department,
-		&emp.Country, &emp.Salary, &emp.Currency, &emp.JoinDate, &emp.CreatedAt, &emp.UpdatedAt)
+	row := r.db.QueryRowContext(ctx, employeeSelectClause+`WHERE e.id = ?`, id)
+	emp, err := scanEmployee(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get employee by id: %w", err)
+		return nil, fmt.Errorf("get employee: %w", err)
 	}
 	return emp, nil
 }
@@ -101,33 +107,51 @@ func (r *employeeRepo) GetByID(ctx context.Context, id int64) (*model.Employee, 
 func (r *employeeRepo) Update(ctx context.Context, emp *model.Employee) error {
 	emp.UpdatedAt = time.Now().UTC()
 
-	result, err := r.db.ExecContext(ctx, `
+	var address interface{}
+	if emp.Address != "" {
+		address = emp.Address
+	}
+
+	res, err := r.db.ExecContext(ctx, `
 		UPDATE employees
-		SET full_name = ?, email = ?, job_title = ?, department = ?, country = ?,
-		    salary = ?, currency = ?, join_date = ?, updated_at = ?
+		SET first_name = ?, last_name = ?, email = ?,
+		    job_title_id = ?, country_id = ?, salary = ?, address = ?,
+		    join_date = ?, updated_at = ?
 		WHERE id = ?`,
-		emp.FullName, emp.Email, emp.JobTitle, emp.Department, emp.Country,
-		emp.Salary, emp.Currency, emp.JoinDate, emp.UpdatedAt, emp.ID,
+		emp.FirstName, emp.LastName, emp.Email,
+		emp.JobTitleID, emp.CountryID, emp.Salary, address,
+		emp.JoinDate, emp.UpdatedAt, emp.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update employee: %w", err)
 	}
-	rows, err := result.RowsAffected()
+	rows, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("rows affected: %w", err)
 	}
 	if rows == 0 {
 		return fmt.Errorf("employee with id %d not found", emp.ID)
 	}
+
+	fresh, err := r.GetByID(ctx, emp.ID)
+	if err != nil {
+		return err
+	}
+	if fresh != nil {
+		*emp = *fresh
+	}
 	return nil
 }
 
-func (r *employeeRepo) Delete(ctx context.Context, id int64) error {
-	result, err := r.db.ExecContext(ctx, "DELETE FROM employees WHERE id = ?", id)
+func (r *employeeRepo) SoftDelete(ctx context.Context, id int64) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE employees SET is_active = 0, updated_at = ? WHERE id = ? AND is_active = 1`,
+		time.Now().UTC(), id,
+	)
 	if err != nil {
-		return fmt.Errorf("delete employee: %w", err)
+		return fmt.Errorf("soft delete employee: %w", err)
 	}
-	rows, err := result.RowsAffected()
+	rows, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("rows affected: %w", err)
 	}
@@ -145,40 +169,41 @@ func (r *employeeRepo) List(ctx context.Context, filter model.EmployeeFilter) (*
 		filter.Limit = 20
 	}
 
-	var conditions []string
-	var args []interface{}
+	conds := []string{"e.is_active = 1"}
+	args := []interface{}{}
 
-	if filter.Country != "" {
-		conditions = append(conditions, "country = ?")
-		args = append(args, filter.Country)
+	if filter.CountryID > 0 {
+		conds = append(conds, "e.country_id = ?")
+		args = append(args, filter.CountryID)
 	}
-	if filter.JobTitle != "" {
-		conditions = append(conditions, "job_title = ?")
-		args = append(args, filter.JobTitle)
+	if filter.JobTitleID > 0 {
+		conds = append(conds, "e.job_title_id = ?")
+		args = append(args, filter.JobTitleID)
+	}
+	if filter.DepartmentID > 0 {
+		conds = append(conds, "jt.department_id = ?")
+		args = append(args, filter.DepartmentID)
 	}
 	if filter.Search != "" {
-		conditions = append(conditions, "(full_name LIKE ? OR email LIKE ?)")
-		search := "%" + filter.Search + "%"
-		args = append(args, search, search)
+		conds = append(conds, "(e.first_name LIKE ? OR e.last_name LIKE ? OR e.email LIKE ?)")
+		s := "%" + filter.Search + "%"
+		args = append(args, s, s, s)
 	}
 
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = "WHERE " + strings.Join(conditions, " AND ")
-	}
+	where := "WHERE " + strings.Join(conds, " AND ")
 
 	var total int64
-	countQuery := "SELECT COUNT(*) FROM employees " + whereClause
+	countQuery := `
+		SELECT COUNT(*) FROM employees e
+		JOIN job_titles jt ON e.job_title_id = jt.id ` + where
 	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count employees: %w", err)
 	}
 
 	offset := (filter.Page - 1) * filter.Limit
-	dataQuery := fmt.Sprintf(`
-		SELECT id, full_name, email, job_title, department, country, salary, currency, join_date, created_at, updated_at
-		FROM employees %s ORDER BY id DESC LIMIT ? OFFSET ?`, whereClause)
-
+	dataQuery := employeeSelectClause + where + ` ORDER BY e.id DESC LIMIT ? OFFSET ?`
 	dataArgs := append(args, filter.Limit, offset)
+
 	rows, err := r.db.QueryContext(ctx, dataQuery, dataArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list employees: %w", err)
@@ -187,12 +212,11 @@ func (r *employeeRepo) List(ctx context.Context, filter model.EmployeeFilter) (*
 
 	var employees []model.Employee
 	for rows.Next() {
-		var emp model.Employee
-		if err := rows.Scan(&emp.ID, &emp.FullName, &emp.Email, &emp.JobTitle, &emp.Department,
-			&emp.Country, &emp.Salary, &emp.Currency, &emp.JoinDate, &emp.CreatedAt, &emp.UpdatedAt); err != nil {
+		emp, err := scanEmployee(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan employee: %w", err)
 		}
-		employees = append(employees, emp)
+		employees = append(employees, *emp)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows iteration: %w", err)
@@ -210,20 +234,24 @@ func (r *employeeRepo) GetSalaryRangeByCountry(ctx context.Context, country stri
 	sr := &model.SalaryRange{Country: country}
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT COALESCE(MIN(salary), 0), COALESCE(MAX(salary), 0),
-		       COALESCE(AVG(salary), 0), COUNT(*)
-		FROM employees WHERE country = ?`, country,
+		SELECT COALESCE(MIN(e.salary), 0), COALESCE(MAX(e.salary), 0),
+		       COALESCE(AVG(e.salary), 0), COUNT(*)
+		FROM employees e
+		JOIN countries c ON e.country_id = c.id
+		WHERE c.name = ? AND e.is_active = 1`, country,
 	).Scan(&sr.Min, &sr.Max, &sr.Average, &sr.Count)
 	if err != nil {
 		return nil, fmt.Errorf("salary range by country: %w", err)
 	}
 
-	// Calculate median using window function
 	err = r.db.QueryRowContext(ctx, `
 		SELECT COALESCE(salary, 0) FROM (
-			SELECT salary, ROW_NUMBER() OVER (ORDER BY salary) as rn,
-			       COUNT(*) OVER () as cnt
-			FROM employees WHERE country = ?
+			SELECT e.salary,
+			       ROW_NUMBER() OVER (ORDER BY e.salary) AS rn,
+			       COUNT(*) OVER () AS cnt
+			FROM employees e
+			JOIN countries c ON e.country_id = c.id
+			WHERE c.name = ? AND e.is_active = 1
 		) WHERE rn = (cnt + 1) / 2`, country,
 	).Scan(&sr.Median)
 	if err == sql.ErrNoRows {
@@ -239,9 +267,12 @@ func (r *employeeRepo) GetSalaryByTitle(ctx context.Context, country, jobTitle s
 	sbt := &model.SalaryByTitle{Country: country, JobTitle: jobTitle}
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT COALESCE(AVG(salary), 0), COALESCE(MIN(salary), 0),
-		       COALESCE(MAX(salary), 0), COUNT(*)
-		FROM employees WHERE country = ? AND job_title = ?`, country, jobTitle,
+		SELECT COALESCE(AVG(e.salary), 0), COALESCE(MIN(e.salary), 0),
+		       COALESCE(MAX(e.salary), 0), COUNT(*)
+		FROM employees e
+		JOIN countries  c  ON e.country_id   = c.id
+		JOIN job_titles jt ON e.job_title_id = jt.id
+		WHERE c.name = ? AND jt.name = ? AND e.is_active = 1`, country, jobTitle,
 	).Scan(&sbt.Average, &sbt.Min, &sbt.Max, &sbt.Count)
 	if err != nil {
 		return nil, fmt.Errorf("salary by title: %w", err)
@@ -252,15 +283,19 @@ func (r *employeeRepo) GetSalaryByTitle(ctx context.Context, country, jobTitle s
 
 func (r *employeeRepo) GetDepartmentStats(ctx context.Context, country string) ([]model.DepartmentStats, error) {
 	query := `
-		SELECT department, AVG(salary), MIN(salary), MAX(salary), COUNT(*)
-		FROM employees`
+		SELECT d.name, AVG(e.salary), MIN(e.salary), MAX(e.salary), COUNT(*)
+		FROM employees e
+		JOIN job_titles  jt ON e.job_title_id  = jt.id
+		JOIN departments d  ON jt.department_id = d.id`
 
+	conds := []string{"e.is_active = 1"}
 	var args []interface{}
 	if country != "" {
-		query += " WHERE country = ?"
+		query += ` JOIN countries c ON e.country_id = c.id`
+		conds = append(conds, "c.name = ?")
 		args = append(args, country)
 	}
-	query += " GROUP BY department ORDER BY AVG(salary) DESC"
+	query += " WHERE " + strings.Join(conds, " AND ") + " GROUP BY d.name ORDER BY AVG(e.salary) DESC"
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -283,9 +318,12 @@ func (r *employeeRepo) GetOrgSummary(ctx context.Context) (*model.OrgSummary, er
 	summary := &model.OrgSummary{}
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT COUNT(*), COALESCE(AVG(salary), 0),
-		       COUNT(DISTINCT country), COUNT(DISTINCT department)
-		FROM employees`,
+		SELECT COUNT(*), COALESCE(AVG(e.salary), 0),
+		       COUNT(DISTINCT e.country_id),
+		       COUNT(DISTINCT jt.department_id)
+		FROM employees e
+		JOIN job_titles jt ON e.job_title_id = jt.id
+		WHERE e.is_active = 1`,
 	).Scan(&summary.TotalEmployees, &summary.AverageSalary,
 		&summary.TotalCountries, &summary.TotalDepartments)
 	if err != nil {
@@ -293,8 +331,12 @@ func (r *employeeRepo) GetOrgSummary(ctx context.Context) (*model.OrgSummary, er
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT country, COUNT(*), AVG(salary)
-		FROM employees GROUP BY country ORDER BY COUNT(*) DESC`)
+		SELECT c.name, COUNT(*), AVG(e.salary)
+		FROM employees e
+		JOIN countries c ON e.country_id = c.id
+		WHERE e.is_active = 1
+		GROUP BY c.name
+		ORDER BY COUNT(*) DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("country breakdown: %w", err)
 	}

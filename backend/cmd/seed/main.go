@@ -1,22 +1,24 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
 	"github.com/salary-manager/backend/internal/repository/sqlite"
-	"github.com/salary-manager/backend/internal/seed"
+	"github.com/salary-manager/backend/seed"
 )
 
 func main() {
 	dbPath := "salary-manager.db"
 
-	// Remove existing DB if present for a clean seed
 	if _, err := os.Stat(dbPath); err == nil {
 		fmt.Println("Removing existing database...")
 		os.Remove(dbPath)
+		os.Remove(dbPath + "-shm")
+		os.Remove(dbPath + "-wal")
 	}
 
 	db, err := sqlite.InitDB(dbPath)
@@ -25,15 +27,20 @@ func main() {
 	}
 	defer db.Close()
 
-	repo := sqlite.NewEmployeeRepository(db)
+	repos := seed.Repos{
+		Country:  sqlite.NewCountryRepository(db),
+		Dept:     sqlite.NewDepartmentRepository(db),
+		JobTitle: sqlite.NewJobTitleRepository(db),
+		Employee: sqlite.NewEmployeeRepository(db),
+	}
 
-	fmt.Println("Seeding 10,000 employees...")
+	fmt.Println("Seeding reference data (countries, departments, job titles)...")
 	start := time.Now()
 
-	if err := seed.GenerateEmployees(repo, 10000); err != nil {
+	fmt.Println("Seeding 10,000 employees...")
+	if err := seed.SeedAll(context.Background(), repos, 10000); err != nil {
 		log.Fatalf("seeding failed: %v", err)
 	}
 
-	elapsed := time.Since(start)
-	fmt.Printf("Done! Seeded 10,000 employees in %s\n", elapsed)
+	fmt.Printf("Done! Seeded reference data + 10,000 employees in %s\n", time.Since(start))
 }

@@ -4,6 +4,12 @@ backend/salary-manager.db-shm
 backend/salary-manager.db-wal
 backend/bin/
 backend/tmp/
+backend/cmd/seed/seed
+backend/cmd/seed/salary-manager.db*
+backend/backend
+**/*.db
+**/*.db-shm
+**/*.db-wal
 
 # Frontend
 frontend/node_modules/
