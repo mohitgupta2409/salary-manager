@@ -33,20 +33,23 @@ func (e Employee) FullName() string {
 	return e.FirstName + " " + e.LastName
 }
 
+// EmployeeFilter is the input to EmployeeRepository.List. It combines
+// query filters with pagination (offset/limit, embedded). A zero or negative
+// Limit means "return all matching records".
 type EmployeeFilter struct {
 	Search       string `json:"search"`
 	CountryID    int64  `json:"country_id"`
 	JobTitleID   int64  `json:"job_title_id"`
 	DepartmentID int64  `json:"department_id"`
-	Page         int    `json:"page"`
-	Limit        int    `json:"limit"`
+	Pagination
 }
 
+// EmployeeListResult is a page of employees plus the unfiltered total.
 type EmployeeListResult struct {
 	Employees []Employee `json:"employees"`
 	Total     int64      `json:"total"`
-	Page      int        `json:"page"`
 	Limit     int        `json:"limit"`
+	Offset    int        `json:"offset"`
 }
 
 type SalaryRange struct {

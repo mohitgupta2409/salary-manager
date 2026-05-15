@@ -2,17 +2,11 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strings"
 
+	"github.com/salary-manager/backend/internal/dto"
 	"github.com/salary-manager/backend/internal/model"
 	"github.com/salary-manager/backend/internal/repository"
-)
-
-var (
-	ErrInvalidInput   = errors.New("invalid input")
-	ErrNotFound       = errors.New("employee not found")
-	ErrDuplicateEmail = errors.New("email already exists")
 )
 
 type EmployeeService struct {
@@ -33,26 +27,33 @@ func NewEmployeeService(
 	}
 }
 
-func (s *EmployeeService) Create(ctx context.Context, emp *model.Employee) error {
+// Create accepts an API-layer request, validates it, persists the
+// resulting model.Employee through the repository, and returns the
+// API-layer response (with denormalised country/job-title fields).
+func (s *EmployeeService) Create(ctx context.Context, req *dto.EmployeeCreateRequest) (*dto.EmployeeResponse, error) {
+	if req == nil {
+		return nil, ErrInvalidInput
+	}
+	emp := dto.ToModelEmployee(req)
 	if err := validateEmployee(emp); err != nil {
-		return err
+		return nil, err
 	}
 	normalize(emp)
 
 	if err := s.validateForeignKeys(ctx, emp); err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := s.repo.Create(ctx, emp); err != nil {
 		if isUniqueViolation(err) {
-			return ErrDuplicateEmail
+			return nil, ErrDuplicateEmail
 		}
-		return err
+		return nil, err
 	}
-	return nil
+	return dto.ToEmployeeResponse(emp), nil
 }
 
-func (s *EmployeeService) GetByID(ctx context.Context, id int64) (*model.Employee, error) {
+func (s *EmployeeService) GetByID(ctx context.Context, id int64) (*dto.EmployeeResponse, error) {
 	if id <= 0 {
 		return nil, ErrInvalidInput
 	}
@@ -63,40 +64,45 @@ func (s *EmployeeService) GetByID(ctx context.Context, id int64) (*model.Employe
 	if emp == nil {
 		return nil, ErrNotFound
 	}
-	return emp, nil
+	return dto.ToEmployeeResponse(emp), nil
 }
 
-func (s *EmployeeService) Update(ctx context.Context, emp *model.Employee) error {
-	if emp.ID <= 0 {
-		return ErrInvalidInput
+// Update applies the request fields to the row identified by id and
+// returns the refreshed API view of the employee.
+func (s *EmployeeService) Update(ctx context.Context, id int64, req *dto.EmployeeUpdateRequest) (*dto.EmployeeResponse, error) {
+	if id <= 0 || req == nil {
+		return nil, ErrInvalidInput
 	}
+	emp := dto.ToModelEmployee(req)
+	emp.ID = id
 	if err := validateEmployee(emp); err != nil {
-		return err
+		return nil, err
 	}
 	normalize(emp)
 
 	if err := s.validateForeignKeys(ctx, emp); err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := s.repo.Update(ctx, emp); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			return ErrNotFound
+			return nil, ErrNotFound
 		}
 		if isUniqueViolation(err) {
-			return ErrDuplicateEmail
+			return nil, ErrDuplicateEmail
 		}
-		return err
+		return nil, err
 	}
-	return nil
+	return dto.ToEmployeeResponse(emp), nil
 }
 
-// Delete performs a soft delete (sets is_active = 0).
+// Delete performs a soft delete via the repository (sets is_active = 0).
+// The row is retained; subsequent List calls will not return it.
 func (s *EmployeeService) Delete(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return ErrInvalidInput
 	}
-	if err := s.repo.SoftDelete(ctx, id); err != nil {
+	if err := s.repo.Delete(ctx, id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return ErrNotFound
 		}
@@ -105,14 +111,25 @@ func (s *EmployeeService) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (s *EmployeeService) List(ctx context.Context, filter model.EmployeeFilter) (*model.EmployeeListResult, error) {
-	if filter.Page < 1 {
-		filter.Page = 1
+// List forwards a filter (with embedded pagination) to the repository,
+// applying default and safety bounds: a non-positive Limit is treated as
+// "all records" by the repo, but the service caps callers at 100 to avoid
+// pathologically large pages over the HTTP API.
+func (s *EmployeeService) List(ctx context.Context, filter model.EmployeeFilter) (*dto.EmployeeListResponse, error) {
+	if filter.Limit > 100 {
+		filter.Limit = 100
 	}
-	if filter.Limit < 1 || filter.Limit > 100 {
-		filter.Limit = 20
+	if filter.Limit < 0 {
+		filter.Limit = 0
 	}
-	return s.repo.List(ctx, filter)
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+	out, err := s.repo.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return dto.ToEmployeeListResponse(out), nil
 }
 
 func (s *EmployeeService) GetSalaryRangeByCountry(ctx context.Context, country string) (*model.SalaryRange, error) {
@@ -147,7 +164,7 @@ func (s *EmployeeService) validateForeignKeys(ctx context.Context, emp *model.Em
 			return err
 		}
 		if c == nil || !c.IsActive {
-			return errors.New("country does not exist or is inactive")
+			return ErrCountryInactive
 		}
 	}
 	if s.jobTitleRepo != nil {
@@ -156,7 +173,7 @@ func (s *EmployeeService) validateForeignKeys(ctx context.Context, emp *model.Em
 			return err
 		}
 		if jt == nil || !jt.IsActive {
-			return errors.New("job title does not exist or is inactive")
+			return ErrJobTitleInactive
 		}
 	}
 	return nil
@@ -164,25 +181,25 @@ func (s *EmployeeService) validateForeignKeys(ctx context.Context, emp *model.Em
 
 func validateEmployee(emp *model.Employee) error {
 	if strings.TrimSpace(emp.FirstName) == "" {
-		return errors.New("first name is required")
+		return ErrFirstNameRequired
 	}
 	if strings.TrimSpace(emp.LastName) == "" {
-		return errors.New("last name is required")
+		return ErrLastNameRequired
 	}
 	if strings.TrimSpace(emp.Email) == "" {
-		return errors.New("email is required")
+		return ErrEmailRequired
 	}
 	if !strings.Contains(emp.Email, "@") {
-		return errors.New("email must be valid")
+		return ErrEmailInvalid
 	}
 	if emp.JobTitleID <= 0 {
-		return errors.New("job title is required")
+		return ErrJobTitleRequired
 	}
 	if emp.CountryID <= 0 {
-		return errors.New("country is required")
+		return ErrCountryRequired
 	}
 	if emp.Salary < 0 {
-		return errors.New("salary must be non-negative")
+		return ErrSalaryNegative
 	}
 	return nil
 }

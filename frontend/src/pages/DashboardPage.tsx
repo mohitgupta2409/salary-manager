@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
-import { Users, Globe, Building2, DollarSign } from 'lucide-react';
+import { Users, Globe, Building2, DollarSign, Briefcase } from 'lucide-react';
 import { insightsApi } from '../api/client';
-import type { OrgSummary, DepartmentStats, SalaryRange } from '../types/employee';
+import { useReferenceData } from '../api/useReferenceData';
+import type { OrgSummary, DepartmentStats, SalaryRange, SalaryByTitle } from '../types/employee';
 
 const COLORS = ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
@@ -16,10 +17,15 @@ function formatCompact(n: number): string {
 }
 
 export default function DashboardPage() {
+  const ref = useReferenceData();
   const [summary, setSummary] = useState<OrgSummary | null>(null);
   const [deptStats, setDeptStats] = useState<DepartmentStats[]>([]);
   const [selectedCountry, setSelectedCountry] = useState('');
   const [countryRange, setCountryRange] = useState<SalaryRange | null>(null);
+  const [selectedJobTitle, setSelectedJobTitle] = useState('');
+  const [titleStats, setTitleStats] = useState<SalaryByTitle | null>(null);
+  const [titleLoading, setTitleLoading] = useState(false);
+  const [titleError, setTitleError] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -54,6 +60,41 @@ export default function DashboardPage() {
       setDeptStats(dept);
     }).catch(console.error);
   }, [selectedCountry]);
+
+  // Reset the job-title drill-down whenever the country changes; the old
+  // (country, title) pair is no longer meaningful.
+  useEffect(() => {
+    setSelectedJobTitle('');
+    setTitleStats(null);
+    setTitleError('');
+  }, [selectedCountry]);
+
+  // The salary-by-title endpoint requires both a country and a title.
+  // Fetch only when the user has picked both.
+  useEffect(() => {
+    if (!selectedCountry || !selectedJobTitle) {
+      setTitleStats(null);
+      return;
+    }
+    let cancelled = false;
+    setTitleLoading(true);
+    setTitleError('');
+    insightsApi.salaryByTitle(selectedCountry, selectedJobTitle)
+      .then(s => { if (!cancelled) setTitleStats(s); })
+      .catch(err => {
+        if (cancelled) return;
+        setTitleError(err instanceof Error ? err.message : 'Failed to load');
+        setTitleStats(null);
+      })
+      .finally(() => { if (!cancelled) setTitleLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedCountry, selectedJobTitle]);
+
+  // Currency of the selected country (used to prefix the salary numbers
+  // in the by-title card so values are unambiguous).
+  const selectedCurrency = useMemo(() => {
+    return ref.countries.find(c => c.name === selectedCountry)?.currency || '';
+  }, [ref.countries, selectedCountry]);
 
   if (loading) {
     return <div className="flex items-center justify-center h-64 text-gray-400">Loading dashboard...</div>;
@@ -137,6 +178,74 @@ export default function DashboardPage() {
           <p className="text-xs text-gray-400 mt-3 text-center">{countryRange.count} employees</p>
         </div>
       )}
+
+      {/* Salary by Job Title (drill-down within the selected country) */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
+        <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-violet-50 text-violet-600">
+              <Briefcase className="w-5 h-5" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Salary by Job Title</h2>
+          </div>
+          <select
+            value={selectedJobTitle}
+            onChange={e => setSelectedJobTitle(e.target.value)}
+            disabled={!selectedCountry || ref.loading}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50 disabled:text-gray-400 min-w-[200px]"
+          >
+            <option value="">{selectedCountry ? 'Select job title...' : 'Pick a country first'}</option>
+            {ref.jobTitles.map(jt => (
+              <option key={jt.id} value={jt.name}>{jt.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {!selectedCountry && (
+          <p className="text-sm text-gray-400 text-center py-6">
+            Select a country above to drill down into average salary for a specific job title.
+          </p>
+        )}
+        {selectedCountry && !selectedJobTitle && (
+          <p className="text-sm text-gray-400 text-center py-6">
+            Choose a job title to see the average, minimum, and maximum salary in {selectedCountry}.
+          </p>
+        )}
+        {titleLoading && (
+          <p className="text-sm text-gray-400 text-center py-6">Loading...</p>
+        )}
+        {titleError && (
+          <p className="text-sm text-red-600 text-center py-6">{titleError}</p>
+        )}
+        {!titleLoading && !titleError && titleStats && titleStats.count === 0 && (
+          <p className="text-sm text-gray-400 text-center py-6">
+            No active employees match {titleStats.job_title} in {titleStats.country}.
+          </p>
+        )}
+        {!titleLoading && !titleError && titleStats && titleStats.count > 0 && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                { label: 'Average', value: titleStats.average, accent: 'text-violet-700' },
+                { label: 'Minimum', value: titleStats.min, accent: 'text-gray-900' },
+                { label: 'Maximum', value: titleStats.max, accent: 'text-gray-900' },
+              ].map(({ label, value, accent }) => (
+                <div key={label} className="text-center p-3 bg-gray-50 rounded-lg">
+                  <p className="text-xs text-gray-500 mb-1">{label}</p>
+                  <p className={`text-lg font-bold ${accent}`}>
+                    {selectedCurrency && <span className="text-gray-500 mr-1">{selectedCurrency}</span>}
+                    {formatCompact(value)}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-3 text-center">
+              Based on {titleStats.count} {titleStats.count === 1 ? 'employee' : 'employees'} —
+              {' '}{titleStats.job_title} in {titleStats.country}
+            </p>
+          </>
+        )}
+      </div>
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">

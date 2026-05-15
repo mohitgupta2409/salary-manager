@@ -1,0 +1,655 @@
+openapi: 3.0.3
+info:
+  title: Salary Manager API
+  description: |
+    REST API for managing employees, countries, departments, job titles and
+    salary insights for the Salary Manager application.
+
+    All responses are JSON. Errors use the shape `{ "error": "<message>" }`.
+    Collection endpoints support pagination via `limit`, `offset` and `page`
+    query parameters; the default page size is **20**. Pass `limit=-1` to
+    disable pagination and return every matching row.
+  version: 1.0.0
+  contact:
+    name: Salary Manager
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+tags:
+  - name: Health
+    description: Service liveness probe
+  - name: Employees
+    description: CRUD and search over employees
+  - name: Countries
+    description: Country reference data
+  - name: Departments
+    description: Department reference data
+  - name: Job Titles
+    description: Job title reference data (each belongs to a department)
+  - name: Insights
+    description: Aggregated salary and headcount analytics
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns `{"status":"ok"}` when the server is reachable.
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/employees:
+    get:
+      tags: [Employees]
+      summary: List employees
+      description: |
+        Returns a paginated list of employees, optionally filtered by free-text
+        search (matches first name, last name or email) and/or by foreign keys.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Page"
+        - in: query
+          name: search
+          schema: { type: string }
+          description: Case-insensitive substring match on name or email.
+        - in: query
+          name: country_id
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: job_title_id
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: department_id
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: A page of employees
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeListResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Employees]
+      summary: Create an employee
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeeCreateRequest"
+      responses:
+        "201":
+          description: Employee created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/employees/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Employees]
+      summary: Get an employee by id
+      responses:
+        "200":
+          description: Employee found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Employees]
+      summary: Update an employee
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeeUpdateRequest"
+      responses:
+        "200":
+          description: Employee updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Employees]
+      summary: Delete an employee
+      responses:
+        "200":
+          description: Employee deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: employee deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/countries:
+    get:
+      tags: [Countries]
+      summary: List countries
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/IncludeInactive"
+      responses:
+        "200":
+          description: A page of countries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CountryListResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Countries]
+      summary: Create a country
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CountryCreateRequest"
+      responses:
+        "201":
+          description: Country created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CountryResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/departments:
+    get:
+      tags: [Departments]
+      summary: List departments
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/IncludeInactive"
+      responses:
+        "200":
+          description: A page of departments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepartmentListResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Departments]
+      summary: Create a department
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepartmentCreateRequest"
+      responses:
+        "201":
+          description: Department created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepartmentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/job-titles:
+    get:
+      tags: [Job Titles]
+      summary: List job titles
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/IncludeInactive"
+        - in: query
+          name: department_id
+          schema: { type: integer, format: int64 }
+          description: Filter to job titles belonging to this department.
+      responses:
+        "200":
+          description: A page of job titles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobTitleListResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Job Titles]
+      summary: Create a job title
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobTitleCreateRequest"
+      responses:
+        "201":
+          description: Job title created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobTitleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/insights/salary-range:
+    get:
+      tags: [Insights]
+      summary: Salary range for a country
+      description: |
+        Returns min, max, average, median and headcount for a country. When
+        `country` is omitted, the figures are computed across the entire
+        organisation.
+      parameters:
+        - in: query
+          name: country
+          schema: { type: string }
+          description: Country name (case-sensitive match on the stored value).
+      responses:
+        "200":
+          description: Salary range statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalaryRange"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/insights/salary-by-title:
+    get:
+      tags: [Insights]
+      summary: Salary statistics by job title
+      parameters:
+        - in: query
+          name: country
+          schema: { type: string }
+        - in: query
+          name: job_title
+          schema: { type: string }
+      responses:
+        "200":
+          description: Salary stats for the given country/title combination
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalaryByTitle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/insights/department-stats:
+    get:
+      tags: [Insights]
+      summary: Per-department salary statistics
+      parameters:
+        - in: query
+          name: country
+          schema: { type: string }
+          description: Optional country filter.
+      responses:
+        "200":
+          description: One entry per department
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DepartmentStats"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/insights/summary:
+    get:
+      tags: [Insights]
+      summary: Organisation-wide summary
+      responses:
+        "200":
+          description: Aggregate counts and per-country breakdown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgSummary"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  parameters:
+    IdPath:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        format: int64
+    Limit:
+      in: query
+      name: limit
+      schema:
+        type: integer
+        default: 20
+      description: |
+        Maximum number of records to return. Defaults to 20. Pass a
+        non-positive value (e.g. `-1`) to disable the limit.
+    Offset:
+      in: query
+      name: offset
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+      description: Number of records to skip.
+    Page:
+      in: query
+      name: page
+      schema:
+        type: integer
+        minimum: 1
+      description: |
+        1-based page number. Convenience alternative to `offset`; ignored when
+        `offset` is supplied.
+    IncludeInactive:
+      in: query
+      name: include_inactive
+      schema:
+        type: boolean
+        default: false
+      description: When true, soft-deleted (inactive) rows are included.
+
+  responses:
+    BadRequest:
+      description: Invalid request (malformed JSON, bad id, or validation error).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Duplicate resource (e.g. email already in use).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: invalid id
+      required: [error]
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [total, limit, offset]
+
+    # ----- Employees -----
+    EmployeeCreateRequest:
+      type: object
+      required:
+        - first_name
+        - last_name
+        - email
+        - job_title_id
+        - country_id
+        - salary
+        - join_date
+      properties:
+        first_name: { type: string, example: Jane }
+        last_name: { type: string, example: Doe }
+        email: { type: string, format: email, example: jane.doe@acme.com }
+        job_title_id: { type: integer, format: int64, example: 12 }
+        country_id: { type: integer, format: int64, example: 1 }
+        salary: { type: number, format: double, example: 95000 }
+        address: { type: string, example: "221B Baker Street, London" }
+        join_date:
+          type: string
+          format: date-time
+          example: "2024-01-15T00:00:00Z"
+
+    EmployeeUpdateRequest:
+      $ref: "#/components/schemas/EmployeeCreateRequest"
+
+    EmployeeResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        full_name: { type: string }
+        email: { type: string, format: email }
+        salary: { type: number, format: double }
+        currency: { type: string, example: EUR, description: "ISO-4217 code for the employee's country, used to format salary." }
+        address: { type: string }
+        join_date: { type: string, format: date-time }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        country: { type: string }
+        job_title: { type: string }
+        department: { type: string }
+
+    EmployeeListResponse:
+      allOf:
+        - $ref: "#/components/schemas/Pagination"
+        - type: object
+          properties:
+            employees:
+              type: array
+              items:
+                $ref: "#/components/schemas/EmployeeResponse"
+          required: [employees]
+
+    # ----- Countries -----
+    CountryCreateRequest:
+      type: object
+      required: [name, code, currency]
+      properties:
+        name: { type: string, example: India }
+        code: { type: string, example: IN, description: "ISO-3166 alpha-2 (uppercase)." }
+        currency: { type: string, example: INR, description: "ISO-4217 (uppercase)." }
+
+    CountryResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        code: { type: string }
+        currency: { type: string }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CountryListResponse:
+      allOf:
+        - $ref: "#/components/schemas/Pagination"
+        - type: object
+          properties:
+            countries:
+              type: array
+              items:
+                $ref: "#/components/schemas/CountryResponse"
+          required: [countries]
+
+    # ----- Departments -----
+    DepartmentCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, example: Engineering }
+
+    DepartmentResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    DepartmentListResponse:
+      allOf:
+        - $ref: "#/components/schemas/Pagination"
+        - type: object
+          properties:
+            departments:
+              type: array
+              items:
+                $ref: "#/components/schemas/DepartmentResponse"
+          required: [departments]
+
+    # ----- Job Titles -----
+    JobTitleCreateRequest:
+      type: object
+      required: [name, department_id]
+      properties:
+        name: { type: string, example: Senior Engineer }
+        department_id: { type: integer, format: int64, example: 3 }
+
+    JobTitleResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        department_id: { type: integer, format: int64 }
+        department: { type: string }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    JobTitleListResponse:
+      allOf:
+        - $ref: "#/components/schemas/Pagination"
+        - type: object
+          properties:
+            job_titles:
+              type: array
+              items:
+                $ref: "#/components/schemas/JobTitleResponse"
+          required: [job_titles]
+
+    # ----- Insights -----
+    SalaryRange:
+      type: object
+      properties:
+        country: { type: string }
+        min: { type: number, format: double }
+        max: { type: number, format: double }
+        average: { type: number, format: double }
+        median: { type: number, format: double }
+        count: { type: integer, format: int64 }
+
+    SalaryByTitle:
+      type: object
+      properties:
+        country: { type: string }
+        job_title: { type: string }
+        average: { type: number, format: double }
+        min: { type: number, format: double }
+        max: { type: number, format: double }
+        count: { type: integer, format: int64 }
+
+    DepartmentStats:
+      type: object
+      properties:
+        department: { type: string }
+        average_salary: { type: number, format: double }
+        min_salary: { type: number, format: double }
+        max_salary: { type: number, format: double }
+        employee_count: { type: integer, format: int64 }
+
+    CountryHeadcount:
+      type: object
+      properties:
+        country: { type: string }
+        employee_count: { type: integer, format: int64 }
+        average_salary: { type: number, format: double }
+
+    OrgSummary:
+      type: object
+      properties:
+        total_employees: { type: integer, format: int64 }
+        average_salary: { type: number, format: double }
+        total_countries: { type: integer, format: int64 }
+        total_departments: { type: integer, format: int64 }
+        country_breakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/CountryHeadcount"

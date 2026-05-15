@@ -57,9 +57,8 @@ salary-manager/
 │   │   ├── model/        # Domain types (Employee, filters, insights)
 │   │   ├── repository/   # Repository interface + SQLite implementation
 │   │   ├── service/      # Business logic and validation
-│   │   ├── handler/      # HTTP handlers (chi router)
-│   │   └── seed/         # Data seeder for 10K employees
-│   └── cmd/seed/         # Seed CLI entry point
+│   │   └── handler/      # HTTP handlers (chi router)
+│   └── cmd/seed/         # Data seeder CLI for 10K employees
 ├── frontend/             # React + TypeScript + Vite SPA
 │   └── src/
 │       ├── api/          # Typed API client

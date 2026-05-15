@@ -62,23 +62,28 @@ export const employeeApi = {
 };
 
 export const countryApi = {
-  list(): Promise<Country[]> {
-    return request(`${BASE}/countries`);
+  async list(): Promise<Country[]> {
+    const res = await request<{ countries: Country[] }>(`${BASE}/countries`);
+    return res.countries;
   },
 };
 
 export const departmentApi = {
-  list(): Promise<Department[]> {
-    return request(`${BASE}/departments`);
+  async list(): Promise<Department[]> {
+    const res = await request<{ departments: Department[] }>(`${BASE}/departments`);
+    return res.departments;
   },
 };
 
 export const jobTitleApi = {
-  list(departmentId?: number): Promise<JobTitle[]> {
+  async list(departmentId?: number): Promise<JobTitle[]> {
     const params = new URLSearchParams();
     if (departmentId) params.set('department_id', String(departmentId));
     const qs = params.toString();
-    return request(`${BASE}/job-titles${qs ? '?' + qs : ''}`);
+    const res = await request<{ job_titles: JobTitle[] }>(
+      `${BASE}/job-titles${qs ? '?' + qs : ''}`,
+    );
+    return res.job_titles;
   },
 };
 

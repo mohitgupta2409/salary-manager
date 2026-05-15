@@ -135,6 +135,7 @@ export default function EmployeesPage() {
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Name</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Email</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Job Title</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Department</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Country</th>
@@ -145,17 +146,15 @@ export default function EmployeesPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading && (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-400">Loading...</td></tr>
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-400">Loading...</td></tr>
               )}
               {!loading && data?.employees?.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-400">No employees found</td></tr>
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-400">No employees found</td></tr>
               )}
               {!loading && data?.employees?.map(emp => (
                 <tr key={emp.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">{emp.first_name} {emp.last_name}</div>
-                    <div className="text-xs text-gray-500">{emp.email}</div>
-                  </td>
+                  <td className="px-4 py-3 font-medium text-gray-900">{emp.full_name}</td>
+                  <td className="px-4 py-3 text-gray-500">{emp.email}</td>
                   <td className="px-4 py-3 text-gray-700">{emp.job_title}</td>
                   <td className="px-4 py-3">
                     <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">

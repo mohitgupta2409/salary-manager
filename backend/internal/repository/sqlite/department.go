@@ -40,20 +40,31 @@ func (r *departmentRepo) Create(ctx context.Context, d *model.Department) error 
 	return nil
 }
 
-func (r *departmentRepo) List(ctx context.Context, includeInactive bool) ([]model.Department, error) {
-	query := `SELECT id, name, is_active, created_at, updated_at FROM departments`
-	if !includeInactive {
-		query += ` WHERE is_active = 1`
-	}
-	query += ` ORDER BY name`
+func (r *departmentRepo) List(ctx context.Context, req model.DepartmentListRequest) (*model.DepartmentListResult, error) {
+	page := req.Pagination.Normalized()
 
-	rows, err := r.db.QueryContext(ctx, query)
+	where := ""
+	var args []interface{}
+	if !req.IncludeInactive {
+		where = " WHERE is_active = 1"
+	}
+
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM departments`+where, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count departments: %w", err)
+	}
+
+	query := `SELECT id, name, is_active, created_at, updated_at
+	          FROM departments` + where + ` ORDER BY name`
+	query, args = applyPagination(query, args, page)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list departments: %w", err)
 	}
 	defer rows.Close()
 
-	var out []model.Department
+	out := []model.Department{}
 	for rows.Next() {
 		var d model.Department
 		if err := rows.Scan(&d.ID, &d.Name, &d.IsActive, &d.CreatedAt, &d.UpdatedAt); err != nil {
@@ -61,7 +72,16 @@ func (r *departmentRepo) List(ctx context.Context, includeInactive bool) ([]mode
 		}
 		out = append(out, d)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	return &model.DepartmentListResult{
+		Departments: out,
+		Total:       total,
+		Limit:       page.Limit,
+		Offset:      page.Offset,
+	}, nil
 }
 
 func (r *departmentRepo) GetByID(ctx context.Context, id int64) (*model.Department, error) {

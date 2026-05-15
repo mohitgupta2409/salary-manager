@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/salary-manager/backend/internal/model"
@@ -40,26 +41,36 @@ func (r *jobTitleRepo) Create(ctx context.Context, jt *model.JobTitle) error {
 	return nil
 }
 
-func (r *jobTitleRepo) List(ctx context.Context, departmentID int64, includeInactive bool) ([]model.JobTitle, error) {
+func (r *jobTitleRepo) List(ctx context.Context, req model.JobTitleListRequest) (*model.JobTitleListResult, error) {
+	page := req.Pagination.Normalized()
+
+	var conds []string
+	var args []interface{}
+	if !req.IncludeInactive {
+		conds = append(conds, "jt.is_active = 1")
+	}
+	if req.DepartmentID > 0 {
+		conds = append(conds, "jt.department_id = ?")
+		args = append(args, req.DepartmentID)
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = " WHERE " + strings.Join(conds, " AND ")
+	}
+
+	var total int64
+	countQuery := `SELECT COUNT(*) FROM job_titles jt` + where
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count job titles: %w", err)
+	}
+
 	query := `
 		SELECT jt.id, jt.name, jt.department_id, d.name AS department_name,
 		       jt.is_active, jt.created_at, jt.updated_at
 		FROM job_titles jt
-		JOIN departments d ON jt.department_id = d.id`
-
-	var conds []string
-	var args []interface{}
-	if !includeInactive {
-		conds = append(conds, "jt.is_active = 1")
-	}
-	if departmentID > 0 {
-		conds = append(conds, "jt.department_id = ?")
-		args = append(args, departmentID)
-	}
-	if len(conds) > 0 {
-		query += " WHERE " + joinConds(conds)
-	}
-	query += " ORDER BY d.name, jt.name"
+		JOIN departments d ON jt.department_id = d.id` + where + `
+		ORDER BY d.name, jt.name`
+	query, args = applyPagination(query, args, page)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -67,7 +78,7 @@ func (r *jobTitleRepo) List(ctx context.Context, departmentID int64, includeInac
 	}
 	defer rows.Close()
 
-	var out []model.JobTitle
+	out := []model.JobTitle{}
 	for rows.Next() {
 		var jt model.JobTitle
 		if err := rows.Scan(&jt.ID, &jt.Name, &jt.DepartmentID, &jt.Department,
@@ -76,7 +87,16 @@ func (r *jobTitleRepo) List(ctx context.Context, departmentID int64, includeInac
 		}
 		out = append(out, jt)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	return &model.JobTitleListResult{
+		JobTitles: out,
+		Total:     total,
+		Limit:     page.Limit,
+		Offset:    page.Offset,
+	}, nil
 }
 
 func (r *jobTitleRepo) GetByID(ctx context.Context, id int64) (*model.JobTitle, error) {
@@ -96,15 +116,4 @@ func (r *jobTitleRepo) GetByID(ctx context.Context, id int64) (*model.JobTitle, 
 		return nil, fmt.Errorf("get job title: %w", err)
 	}
 	return jt, nil
-}
-
-func joinConds(conds []string) string {
-	out := ""
-	for i, c := range conds {
-		if i > 0 {
-			out += " AND "
-		}
-		out += c
-	}
-	return out
 }

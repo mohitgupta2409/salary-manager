@@ -28,11 +28,15 @@ export interface JobTitle {
 
 export interface Employee {
   id: number;
-  first_name: string;
-  last_name: string;
+  // The API returns a single full_name field (FirstName + LastName joined
+  // server-side); first_name/last_name are kept as optional so the edit
+  // form can populate them when constructing an EmployeeFormData.
+  full_name: string;
+  first_name?: string;
+  last_name?: string;
   email: string;
-  job_title_id: number;
-  country_id: number;
+  job_title_id?: number;
+  country_id?: number;
   salary: number;
   address?: string;
   join_date: string;

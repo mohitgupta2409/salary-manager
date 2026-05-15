@@ -43,20 +43,31 @@ func (r *countryRepo) Create(ctx context.Context, c *model.Country) error {
 	return nil
 }
 
-func (r *countryRepo) List(ctx context.Context, includeInactive bool) ([]model.Country, error) {
-	query := `SELECT id, name, code, currency, is_active, created_at, updated_at FROM countries`
-	if !includeInactive {
-		query += ` WHERE is_active = 1`
-	}
-	query += ` ORDER BY name`
+func (r *countryRepo) List(ctx context.Context, req model.CountryListRequest) (*model.CountryListResult, error) {
+	page := req.Pagination.Normalized()
 
-	rows, err := r.db.QueryContext(ctx, query)
+	where := ""
+	var args []interface{}
+	if !req.IncludeInactive {
+		where = " WHERE is_active = 1"
+	}
+
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM countries`+where, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count countries: %w", err)
+	}
+
+	query := `SELECT id, name, code, currency, is_active, created_at, updated_at
+	          FROM countries` + where + ` ORDER BY name`
+	query, args = applyPagination(query, args, page)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list countries: %w", err)
 	}
 	defer rows.Close()
 
-	var out []model.Country
+	out := []model.Country{}
 	for rows.Next() {
 		var c model.Country
 		if err := rows.Scan(&c.ID, &c.Name, &c.Code, &c.Currency, &c.IsActive, &c.CreatedAt, &c.UpdatedAt); err != nil {
@@ -64,7 +75,16 @@ func (r *countryRepo) List(ctx context.Context, includeInactive bool) ([]model.C
 		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	return &model.CountryListResult{
+		Countries: out,
+		Total:     total,
+		Limit:     page.Limit,
+		Offset:    page.Offset,
+	}, nil
 }
 
 func (r *countryRepo) GetByID(ctx context.Context, id int64) (*model.Country, error) {

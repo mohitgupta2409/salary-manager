@@ -63,6 +63,17 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	// API documentation: Swagger UI at /api/docs, raw spec at
+	// /api/docs/openapi.yaml. Both are served as static files from ./docs
+	// so the spec stays in source control and there is no codegen step.
+	r.Get("/api/docs", func(w http.ResponseWriter, req *http.Request) {
+		http.ServeFile(w, req, "docs/swagger.html")
+	})
+	r.Get("/api/docs/openapi.yaml", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
+		http.ServeFile(w, req, "docs/openapi.yaml")
+	})
+
 	log.Println("Server starting on :8080")
 	if err := http.ListenAndServe(":8080", r); err != nil {
 		log.Fatalf("server error: %v", err)

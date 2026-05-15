@@ -44,21 +44,27 @@ export default function EmployeeModal({
 
   useEffect(() => {
     if (employee) {
+      // The API returns full_name (joined server-side) and looks up
+      // job_title/country by name; resolve back to the FK ids the form
+      // needs by matching against the reference data. Splitting on the
+      // first space keeps multi-word last names intact.
+      const [firstName = '', ...lastParts] = (employee.full_name || '').split(' ');
+      const jt = jobTitles.find(j => j.name === employee.job_title);
+      const country = countries.find(c => c.name === employee.country);
+
       setForm({
-        first_name: employee.first_name,
-        last_name: employee.last_name,
+        first_name: firstName,
+        last_name: lastParts.join(' '),
         email: employee.email,
-        job_title_id: employee.job_title_id,
-        country_id: employee.country_id,
+        job_title_id: jt?.id ?? 0,
+        country_id: country?.id ?? 0,
         salary: employee.salary,
         address: employee.address || '',
         join_date: employee.join_date.split('T')[0],
       });
-      // Set department from the employee's job title
-      const jt = jobTitles.find(j => j.id === employee.job_title_id);
       if (jt) setDepartmentID(jt.department_id);
     }
-  }, [employee, jobTitles]);
+  }, [employee, jobTitles, countries]);
 
   const handleDepartmentChange = (deptID: number) => {
     setDepartmentID(deptID);

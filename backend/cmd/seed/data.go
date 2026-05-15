@@ -1,7 +1,4 @@
-// Package seed contains reference data and the logic to populate the database
-// with realistic demo records. Lives outside internal/ so it can be reused by
-// integration tests and external tooling if needed.
-package seed
+package main
 
 type CountryConfig struct {
 	Name     string

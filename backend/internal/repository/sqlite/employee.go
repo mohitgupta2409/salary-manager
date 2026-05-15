@@ -143,13 +143,17 @@ func (r *employeeRepo) Update(ctx context.Context, emp *model.Employee) error {
 	return nil
 }
 
-func (r *employeeRepo) SoftDelete(ctx context.Context, id int64) error {
+// Delete is a soft delete: it flips is_active to 0 on a currently-active row
+// and bumps updated_at. The row is retained for audit/history. Calling Delete
+// on a non-existent or already-inactive id returns a "not found" error so
+// callers can distinguish a no-op from a real change.
+func (r *employeeRepo) Delete(ctx context.Context, id int64) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE employees SET is_active = 0, updated_at = ? WHERE id = ? AND is_active = 1`,
 		time.Now().UTC(), id,
 	)
 	if err != nil {
-		return fmt.Errorf("soft delete employee: %w", err)
+		return fmt.Errorf("delete employee: %w", err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
@@ -161,13 +165,12 @@ func (r *employeeRepo) SoftDelete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// List returns a paginated view of active employees that match the filter.
+// Pagination is offset/limit; a non-positive Limit means "return all matching
+// records" (no LIMIT clause). The returned Total reflects the count of
+// matching rows independent of pagination.
 func (r *employeeRepo) List(ctx context.Context, filter model.EmployeeFilter) (*model.EmployeeListResult, error) {
-	if filter.Page < 1 {
-		filter.Page = 1
-	}
-	if filter.Limit < 1 || filter.Limit > 100 {
-		filter.Limit = 20
-	}
+	page := filter.Pagination.Normalized()
 
 	conds := []string{"e.is_active = 1"}
 	args := []interface{}{}
@@ -200,9 +203,8 @@ func (r *employeeRepo) List(ctx context.Context, filter model.EmployeeFilter) (*
 		return nil, fmt.Errorf("count employees: %w", err)
 	}
 
-	offset := (filter.Page - 1) * filter.Limit
-	dataQuery := employeeSelectClause + where + ` ORDER BY e.id DESC LIMIT ? OFFSET ?`
-	dataArgs := append(args, filter.Limit, offset)
+	dataQuery := employeeSelectClause + where + ` ORDER BY e.id DESC`
+	dataQuery, dataArgs := applyPagination(dataQuery, args, page)
 
 	rows, err := r.db.QueryContext(ctx, dataQuery, dataArgs...)
 	if err != nil {
@@ -210,7 +212,7 @@ func (r *employeeRepo) List(ctx context.Context, filter model.EmployeeFilter) (*
 	}
 	defer rows.Close()
 
-	var employees []model.Employee
+	employees := []model.Employee{}
 	for rows.Next() {
 		emp, err := scanEmployee(rows)
 		if err != nil {
@@ -225,8 +227,8 @@ func (r *employeeRepo) List(ctx context.Context, filter model.EmployeeFilter) (*
 	return &model.EmployeeListResult{
 		Employees: employees,
 		Total:     total,
-		Page:      filter.Page,
-		Limit:     filter.Limit,
+		Limit:     page.Limit,
+		Offset:    page.Offset,
 	}, nil
 }
 
